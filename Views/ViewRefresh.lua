@@ -34,6 +34,11 @@ function WhoDoesWhat:RefreshBoardViews()
     self:RefreshPaladinBuffingBar()
     self:RefreshPallyPowerDiffView()
     self:RefreshStatusBarsView()
+    -- Not a window of ours, but the same trigger: the spec icons we draw on
+    -- Blizzard's raid frames move when the board does, and nothing on their
+    -- side would ever repaint them. Throttled at its end, since this call
+    -- rides the buff-tracking notify (RaidFrameExtensions.lua).
+    self:RefreshRaidFrameRoleIcons()
 end
 
 -- Ask for a repaint of everything, without insisting on one right now.

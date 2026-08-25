@@ -339,6 +339,18 @@ local defaults = {
             -- Append the player's WDW role to Blizzard's unit tooltip
             -- (UnitTooltipExtensions.lua). Display only, group members only.
             unitTooltipRole = true,
+            -- Draw the player's WDW spec icon in the top-left corner of
+            -- Blizzard's compact raid/party frames, over the group icon that
+            -- normally sits there (RaidFrameExtensions.lua). Display only, and
+            -- only for players whose spec we actually know.
+            raidFrameRoleIcons = true,
+            -- Keep those icons up while you are fighting. Nothing here is
+            -- combat-restricted -- a texture carries no protected state, and
+            -- the client repaints that same corner mid-fight itself -- so this
+            -- is purely a "leave my raid frames alone during a pull"
+            -- preference. Off hands the corner back for the fight and takes it
+            -- again when the fight ends.
+            raidFrameRoleIconsInCombat = true,
             -- Also append the roster hover summary (paladin blessing talents,
             -- warlock healthstone) to that tooltip. Off by default: it is
             -- several lines, and most hovers do not want them.

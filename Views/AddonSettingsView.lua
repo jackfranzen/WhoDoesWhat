@@ -1132,6 +1132,29 @@ local function EnsureSettingsFrame()
         function(value)
             WhoDoesWhat.db.profile.settings.unitTooltipDetail = value
         end)
+    f.raidFrameRoleCheck, yL = AddCompactCheckboxRow(generalPage, CONTENT_X, yL,
+        "Show roles on raid frames",
+        "Draw each raider's spec icon in the top-left corner of Blizzard's "
+            .. "raid frames, over the group icon that normally sits there. "
+            .. "Players whose spec has not been chosen or scanned yet keep the "
+            .. "corner Blizzard drew.",
+        function(value)
+            WhoDoesWhat.db.profile.settings.raidFrameRoleIcons = value
+            WhoDoesWhat:LogUiBuilding("Raid frame role icons "
+                .. (value and "enabled." or "disabled."))
+            WhoDoesWhat:RefreshRaidFrameRoleIcons()
+        end)
+    f.raidFrameCombatCheck, yL = AddCompactCheckboxRow(generalPage, CONTENT_X, yL,
+        "Keep raid frame roles in combat",
+        "Leave those spec icons up while you are fighting. Turn off to hand "
+            .. "that corner back to Blizzard for the length of a pull and take "
+            .. "it again once the fight ends.",
+        function(value)
+            WhoDoesWhat.db.profile.settings.raidFrameRoleIconsInCombat = value
+            WhoDoesWhat:LogUiBuilding("Raid frame role icons in combat "
+                .. (value and "enabled." or "disabled."))
+            WhoDoesWhat:RefreshRaidFrameRoleIcons()
+        end)
     f.announceRoleCheck, yL = AddCompactCheckboxRow(generalPage, CONTENT_X, yL, "Announce role changes in chat",
         "Post to raid/party chat when someone's role is changed. Turn off to keep role edits silent.",
         function(value)
@@ -1744,6 +1767,8 @@ function WhoDoesWhat:OpenAddonSettingsView(section)
     RefreshBuffingTestPaladinDropdown(f)
     f.unitTooltipCheck:SetChecked(settings.unitTooltipRole ~= false)
     f.unitTooltipDetailCheck:SetChecked(settings.unitTooltipDetail)
+    f.raidFrameRoleCheck:SetChecked(settings.raidFrameRoleIcons ~= false)
+    f.raidFrameCombatCheck:SetChecked(settings.raidFrameRoleIconsInCombat ~= false)
     f.announceRoleCheck:SetChecked(settings.announceRoleChanges)
     f.manageBlizzRolesCheck:SetChecked(settings.manageBlizzardRoles ~= false)
     f.overviewCheck:SetChecked(settings.overviewEnabled)

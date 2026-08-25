@@ -29,6 +29,7 @@ Large WoW addon (TBC 2.5.5 Anniversary) for managing raid assignments, roles, an
 * `PallyPowerBridge.lua` — push computed buff grid into PallyPower over its own wire protocol; PLPWR traffic log
 * `WdwFrame.lua` — window chrome factory (backdrop, title, close, drag, Escape)
 * `UnitMenuExtensions.lua` — unit right-click menu additional options, role/cc/MD setters
+* `RaidFrameExtensions.lua` — spec icon drawn over the group icon on Blizzard's compact raid/party frames (hooks `CompactUnitFrame_UpdateRoleIcon`)
 * `RaidMenuExtensions.lua` — main-tank promote helper extension for WoW raid view UI
 * `Views/` — one file per UI panel:
   * `SectionKit.lua` — shared widget primitives for the assignment sections (`WhoDoesWhat.SectionKit`): geometry constants, box chrome with injectable right-aligned header buttons (`CreateSectionChrome` + `ChainHeaderButton` + `LayoutHeaderChain`), mail/warning/dropdown/row helpers, `AddPlayerMenuItems`, scroll-height bookkeeping, and the clear-all confirm popup. Section-agnostic — no flags, no per-section branches.
