@@ -449,8 +449,29 @@ local function CreateSummaryRow(f, index)
     return row
 end
 
-local function RenderSummary(f, data, gridX, columnStart, plans, sourceLabels)
-    for index, paladin in ipairs(data.paladins) do
+-- A paladin who blesses nobody in either plan is a pair of columns full of
+-- X's -- wide, and silent about the difference this window exists to show.
+-- Drop them from the paint only; data.paladins stays whole because the "top N
+-- buffs" rule counts the raid's paladins, not the ones on screen.
+local function VisiblePaladins(data)
+    local shown = {}
+    for _, paladin in ipairs(data.paladins) do
+        for _, member in ipairs(data.members) do
+            local current = data.current and data.current.grid[member.planName]
+            local suggested = data.suggested and data.suggested.grid[member.planName]
+            if (current and current[paladin.name])
+                or (suggested and suggested[paladin.name]) then
+                shown[#shown + 1] = paladin
+                break
+            end
+        end
+    end
+    -- Never paint a grid with no columns at all.
+    return #shown > 0 and shown or data.paladins
+end
+
+local function RenderSummary(f, paladins, gridX, columnStart, plans, sourceLabels)
+    for index, paladin in ipairs(paladins) do
         local row = f.summaryRows[index] or CreateSummaryRow(f, index)
         row:ClearAllPoints()
         row:SetPoint("TOPLEFT", f.header, "TOPLEFT", 0, -(TITLE_H + (index - 1) * SUMMARY_ROW_H))
@@ -494,7 +515,7 @@ local function RenderSummary(f, data, gridX, columnStart, plans, sourceLabels)
         end
         row:Show()
     end
-    for index = #data.paladins + 1, #f.summaryRows do
+    for index = #paladins + 1, #f.summaryRows do
         f.summaryRows[index]:Hide()
     end
 end
@@ -535,7 +556,7 @@ local function SetExpanded(f, width, summaryHeight, bodyHeight, showWarning)
 end
 
 local function RenderGrid(f, data)
-    local paladins = data.paladins
+    local paladins = VisiblePaladins(data)
     local paladinW = K.PaladinColumnsWidth(paladins, COL_W, 3)
     local leftW = LEFT_PREFIX_W + paladinW
     local rightW = paladinW
@@ -566,7 +587,7 @@ local function RenderGrid(f, data)
     local sourceLabels = { "Current", "Suggested" }
     local headerIconsTop = TITLE_H + summaryHeight
 
-    RenderSummary(f, data, gridX, columnStart, plans, sourceLabels)
+    RenderSummary(f, paladins, gridX, columnStart, plans, sourceLabels)
 
     -- A raider with no role yet only gets the canonical fallback order, so the
     -- "suggested" column is a guess rather than a plan. Show it greyed out and
