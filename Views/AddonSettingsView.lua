@@ -319,6 +319,20 @@ local function SetOptionAvailable(check, label, available)
         available and 1 or 0.45, available and 1 or 0.45)
 end
 
+-- The raid-frame master switch owns the style and combat rows under it: with
+-- it off we touch Blizzard's frames at all, so neither has anything to say.
+local function RefreshRaidFrameOptionStates(f)
+    local on = WhoDoesWhat.db.profile.settings.raidFrameRoleIcons ~= false
+    SetOptionAvailable(f.raidFrameCombatCheck, f.raidFrameCombatLabel, on)
+    local shade = on and 1 or 0.45
+    f.raidStyleLabel:SetTextColor(shade, shade, shade)
+    if on then
+        UIDropDownMenu_EnableDropDown(f.raidStyleDD)
+    else
+        UIDropDownMenu_DisableDropDown(f.raidStyleDD)
+    end
+end
+
 local function DefaultStatusBarColor(definition)
     if definition.colorRGB then return definition.colorRGB end
     for _, classInfo in ipairs(WhoDoesWhat.Classes) do
@@ -1134,17 +1148,58 @@ local function EnsureSettingsFrame()
         end)
     f.raidFrameRoleCheck, yL = AddCompactCheckboxRow(generalPage, CONTENT_X, yL,
         "Show roles on raid frames",
-        "Draw each raider's spec icon in the top-left corner of Blizzard's "
-            .. "raid frames, over the group icon that normally sits there. "
-            .. "Players whose spec has not been chosen or scanned yet keep the "
-            .. "corner Blizzard drew.",
+        "Draw each raider's spec icon onto Blizzard's raid frames, over the "
+            .. "group icon that normally sits there. Players whose spec has "
+            .. "not been chosen or scanned yet keep the corner Blizzard drew."
+            .. "\n\nOff leaves Blizzard's raid frames entirely alone, and "
+            .. "greys out the two options below.",
         function(value)
             WhoDoesWhat.db.profile.settings.raidFrameRoleIcons = value
             WhoDoesWhat:LogUiBuilding("Raid frame role icons "
                 .. (value and "enabled." or "disabled."))
+            RefreshRaidFrameOptionStates(f)
             WhoDoesWhat:RefreshRaidFrameRoleIcons()
         end)
-    f.raidFrameCombatCheck, yL = AddCompactCheckboxRow(generalPage, CONTENT_X, yL,
+
+    local raidStyleLabel = generalPage:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    raidStyleLabel:SetPoint("TOPLEFT", CONTENT_X + 4, -(yL + 4))
+    raidStyleLabel:SetText("Raid frame style:")
+    local raidStyleLabels = {
+        corner = "Top-left icon",
+        band = "Left band",
+        bandFaded = "Left band, faded",
+        bandRight = "Right band",
+        bandRightFaded = "Right band, faded",
+    }
+    f.raidStyleLabels = raidStyleLabels
+    local raidStyleDD = CreateFrame("Frame", "WhoDoesWhatRaidFrameStyleDD",
+        generalPage, "UIDropDownMenuTemplate")
+    raidStyleDD:SetPoint("LEFT", raidStyleLabel, "RIGHT", -6, -2)
+    UIDropDownMenu_SetWidth(raidStyleDD, 120)
+    WhoDoesWhat:StyleDropdown(raidStyleDD, true)
+    UIDropDownMenu_Initialize(raidStyleDD, function(_, level)
+        local saved = WhoDoesWhat.db.profile.settings.raidFrameRoleIconStyle
+            or "bandFaded"
+        for _, mode in ipairs({ "corner", "band", "bandFaded",
+            "bandRight", "bandRightFaded" }) do
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = raidStyleLabels[mode]
+            info.checked = (saved == mode)
+            info.func = function()
+                WhoDoesWhat.db.profile.settings.raidFrameRoleIconStyle = mode
+                UIDropDownMenu_SetText(raidStyleDD, raidStyleLabels[mode])
+                WhoDoesWhat:LogUiBuilding("Raid frame role icon style: " .. mode)
+                WhoDoesWhat:RefreshRaidFrameRoleIcons()
+            end
+            UIDropDownMenu_AddButton(info, level)
+        end
+    end)
+    f.raidStyleDD = raidStyleDD
+    f.raidStyleLabel = raidStyleLabel
+    yL = yL + 32
+
+    f.raidFrameCombatCheck, yL, f.raidFrameCombatLabel = AddCompactCheckboxRow(
+        generalPage, CONTENT_X, yL,
         "Keep raid frame roles in combat",
         "Leave those spec icons up while you are fighting. Turn off to hand "
             .. "that corner back to Blizzard for the length of a pull and take "
@@ -1769,6 +1824,10 @@ function WhoDoesWhat:OpenAddonSettingsView(section)
     f.unitTooltipDetailCheck:SetChecked(settings.unitTooltipDetail)
     f.raidFrameRoleCheck:SetChecked(settings.raidFrameRoleIcons ~= false)
     f.raidFrameCombatCheck:SetChecked(settings.raidFrameRoleIconsInCombat ~= false)
+    UIDropDownMenu_SetText(f.raidStyleDD,
+        f.raidStyleLabels[settings.raidFrameRoleIconStyle or "bandFaded"]
+            or f.raidStyleLabels.bandFaded)
+    RefreshRaidFrameOptionStates(f)
     f.announceRoleCheck:SetChecked(settings.announceRoleChanges)
     f.manageBlizzRolesCheck:SetChecked(settings.manageBlizzardRoles ~= false)
     f.overviewCheck:SetChecked(settings.overviewEnabled)
