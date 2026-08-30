@@ -233,7 +233,11 @@ local function AddCompactCheckboxRow(f, x, y, labelText, tooltip, apply)
 end
 
 local MINIMAP_NAME = "WhoDoesWhat"
-local MINIMAP_ICON = "Interface\\AddOns\\WhoDoesWhat\\Icon.png"
+-- The TGA, not the PNG beside it: the client loads BLP and TGA and nothing
+-- else, so the artwork the README shows is not something the game can draw.
+-- 64px for a button rendered at about 17, which leaves it sharp without
+-- shipping the full-size source in the package (see .pkgmeta).
+local MINIMAP_ICON = "Interface\\AddOns\\WhoDoesWhat\\Media\\Icon.tga"
 local minimapIcon
 local minimapLoader = CreateFrame("Frame")
 
@@ -262,14 +266,33 @@ local function MinimapTooltip(tooltip)
         1, 0.82, 0, 1, 1, 1)
 end
 
+-- LibDBIcon, and nothing of our own on top of it. That is the whole point.
+--
+-- Every addon that manages minimap buttons -- Leatrix Plus's "hide addon
+-- buttons", MinimapButtonButton's bag, SexyMap, Chinchilla -- finds buttons by
+-- walking LibDBIcon's own registry. Registering is what makes the user's
+-- minimap addon responsible for showing, hiding and fading this button, which
+-- is where that belongs: if it fades, it is because they asked something to
+-- fade it, and if it does not, they did not.
+--
+-- This used to call ShowOnEnter on itself, so the button faded out whenever
+-- the mouse left the minimap whether or not anybody had asked for that -- our
+-- own half of a job the user's minimap addon was already doing, and not
+-- reachable from any setting of ours. Gone; the library's default is to sit
+-- there and be visible.
+--
+-- The libraries are bundled now rather than borrowed. They were declared
+-- OptionalDeps and looked up hopefully, which meant the button existed only
+-- when some OTHER addon happened to embed LibDBIcon -- and silently printed a
+-- "libraries are not loaded" line at anyone whose addon set did not.
 function WhoDoesWhat:InitializeMinimapButton()
     if minimapIcon then return end
     local broker = LibStub("LibDataBroker-1.1", true)
     local icon = LibStub("LibDBIcon-1.0", true)
-    if not broker or not icon or not icon.ShowOnEnter then
-        self:Print("Minimap button unavailable: compatible LibDataBroker and LibDBIcon libraries are not loaded.")
-        return
-    end
+    -- Shipped in Libs, so this should not fail -- but an older copy of either
+    -- can win LibStub if another addon loaded first, and a nil here should be
+    -- a missing button rather than an error thrown at somebody mid-pull.
+    if not broker or not icon then return end
     local launcher = broker:NewDataObject(MINIMAP_NAME, {
         type = "launcher",
         text = MINIMAP_NAME,
@@ -279,18 +302,28 @@ function WhoDoesWhat:InitializeMinimapButton()
     })
     icon:Register(MINIMAP_NAME, launcher,
         self.db.profile.settings.minimapButton)
-    local button = icon:GetMinimapButton(MINIMAP_NAME)
-    local mask = button:CreateMaskTexture(nil, "ARTWORK")
-    mask:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask",
-        "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
-    mask:SetAllPoints(button.icon)
-    button.icon:AddMaskTexture(mask)
-    button.wdwIconMask = mask
-    icon:ShowOnEnter(MINIMAP_NAME, true)
     minimapIcon = icon
+
+    -- Round the artwork off so a square icon sits inside the ring instead of
+    -- poking out of its four corners. Guarded: CreateMaskTexture is not on
+    -- every client this loads on, and without it the icon is a square, which
+    -- is what every minimap button looked like for fifteen years.
+    local button = icon:GetMinimapButton(MINIMAP_NAME)
+    if button and button.CreateMaskTexture then
+        local mask = button:CreateMaskTexture(nil, "ARTWORK")
+        mask:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask",
+            "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+        mask:SetAllPoints(button.icon)
+        button.icon:AddMaskTexture(mask)
+    end
+
     self:UpdateMinimapButtonVisibility()
 end
 
+-- PLAYER_LOGIN rather than straight away, even though the libraries are ours
+-- now: it is when Leatrix Plus and friends do their own setup, and registering
+-- here is what lets their LibDBIcon_IconCreated callback see us -- that
+-- callback is how a late button inherits the user's setting.
 function WhoDoesWhat:ScheduleMinimapButtonInitialization()
     if IsLoggedIn() then
         self:InitializeMinimapButton()

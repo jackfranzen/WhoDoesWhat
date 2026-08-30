@@ -704,8 +704,8 @@ function WhoDoesWhat:OnInitialize()
     -- Register our slash commands
     self:RegisterChatCommand("wdw", "ToggleMainUI")
 
-    -- LibDBIcon may be embedded by an addon loaded after WDW, so bind once all
-    -- enabled addons have registered their shared libraries.
+    -- Registers at PLAYER_LOGIN, which is when the minimap-manager addons do
+    -- their own setup and can therefore see ours.
     self:ScheduleMinimapButtonInitialization()
 
     -- Inject our section into the unit right-click menus

@@ -1,6 +1,10 @@
 package-as: WhoDoesWhat
 
 ignore:
+    # Repository artwork, not a game asset: the client cannot draw a PNG, so
+    # this one is only ever the README's and the project page's. Media/Icon.tga
+    # is the copy the addon actually loads.
+    - Media/Icon.png
     - README.md
     - AGENTS.md
     - DEVELOPMENT.md

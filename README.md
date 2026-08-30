@@ -1,4 +1,4 @@
-<img src="Icon.png" align="right" width="96" alt="WhoDoesWhat icon">
+<img src="Media/Icon.png" align="right" width="96" alt="WhoDoesWhat icon">
 
 # WhoDoesWhat
 
