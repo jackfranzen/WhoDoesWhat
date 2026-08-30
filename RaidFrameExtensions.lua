@@ -1,115 +1,155 @@
 local WhoDoesWhat = LibStub("AceAddon-3.0"):GetAddon("WhoDoesWhat")
 
--- Draws a raider's WDW spec icon in the top-left corner of Blizzard's compact
--- raid (and raid-style party) frames, where the client otherwise draws the
--- group icon -- the main-tank / main-assist marker, or the tank/healer/damager
--- group-role symbol.
+-- Draws a raider's WDW spec icon onto Blizzard's compact raid (and raid-style
+-- party) frames, standing in for the group icon the client draws there -- the
+-- main-tank / main-assist marker, or the tank/healer/damager symbol.
 --
 -- Display only, and deliberately quiet: a player whose spec has neither been
--- chosen on the board nor scanned from their talents gets nothing from us, and
--- the client's own icon is left exactly as it drew it. Same while the setting
--- is off.
+-- chosen on the board nor scanned from their talents gets nothing from us.
 --
--- We repaint Blizzard's own `roleIcon` texture rather than adding one of our
--- own. The client re-runs CompactUnitFrame_UpdateRoleIcon on every event that
--- can change that corner -- roster changes, role flags, a frame being reused
--- for a different unit -- so hooking it is what keeps us on top of it without
--- a ticker; borrowing the texture also starts us from its exact position and
--- size, which is what our scale and corner offset are measured against. When
--- our icon goes away we hand the corner back -- size, anchor and all -- and
--- let the client redraw whatever it would have drawn on its own.
+-- ---------------------------------------------------------------------------
+-- We draw into a texture of our OWN and hide the client's behind it, and the
+-- only thing we ever change on the client's side is that texture's ALPHA.
 --
--- What we do NOT inherit is the raid profile's own show/hide of that corner:
--- a known spec draws even where the profile has role icons switched off, and
--- over the vehicle icon. Our setting is the switch for this, and a feature
--- that silently drew nothing because of a checkbox in a different window
--- would just read as broken.
+-- The first version of this repainted the client's `roleIcon` in place, which
+-- meant borrowing its size, anchor, coordinates and gradient and owing every
+-- one of them back. Each was a way to strand the client's icon somewhere it
+-- could not recover from: a leftover band mask rendered its role icon as a
+-- zoomed slice of itself, and a restore that put back a size but never a Show
+-- left the corner empty until a reload built the frames again. There is no
+-- amount of care that makes borrowing safe, because handing it back means
+-- reproducing a decision -- shown, sized and atlased from the unit -- that is
+-- the client's to make and ours only to guess at.
+--
+-- Alpha is the whole of the bargain now. The client keeps its own geometry, so
+-- nothing of ours can distort it; it goes on drawing its icon at full size
+-- underneath, invisibly, and putting the corner back is SetAlpha(1) on a
+-- texture that never stopped being correct. Nothing in the client writes alpha
+-- on this texture, so it stays put between our passes without a fight.
+--
+-- It also gets the text right for free. The client anchors the name to the
+-- role icon's edge, so every attempt to resize that icon dragged the name
+-- around and had to be corrected back -- the source of the indented and
+-- floating names. An icon that keeps its size does not move the name at all,
+-- so every style now leaves the client's own text layout untouched.
+--
+-- What we do NOT leave alone is the raid profile's own show/hide of that
+-- corner: a known spec draws even where the profile has role icons switched
+-- off, and over the vehicle icon. Our setting is the switch for this, and a
+-- feature that silently drew nothing because of a checkbox in a different
+-- window would just read as broken.
+-- ---------------------------------------------------------------------------
 
 -- ---------------------------------------------------------------------------
 -- Styles
 --
--- "corner" keeps the client's own shape: a square icon in the corner it lays
--- that texture out in, drawn smaller and tighter than it draws its own -- 0.78
--- of the size it uses (17px in the default profile, so 13), flush horizontally
--- and 1px down, where it insets by 3,-2.
+-- "corner" stands in for the client's own icon where it draws it: a round one,
+-- masked and ringed, at 0.78 of the size it uses (17px in the default profile,
+-- so 13) and centred on the spot its own icon occupies. Being a replacement
+-- rather than an addition, it is also the one style that draws NOTHING for a
+-- player the board has no role for -- it simply stands down, and the client's
+-- own group role icon is there already, at full alpha, needing nothing from us.
 --
--- The two band styles instead run the icon down the whole left edge of the
--- health bar, a vertical strip from the top-left corner to just above the
--- power bar. The health bar is the right thing to measure against rather than
--- the frame: the client anchors it from the frame's top-left down to exactly
--- where the power bar starts, so its left edge already IS that span -- no
--- power-bar arithmetic here, and a profile with the power bar switched off
--- lengthens the band on its own.
+-- The band styles instead run the icon down an edge of the health bar, from
+-- the top corner to just above the power bar. The health bar is the right
+-- thing to measure against rather than the frame: the client anchors it from
+-- the frame's top-left down to exactly where the power bar starts, so its edge
+-- already IS that span -- no power-bar arithmetic here, and a profile with the
+-- power bar switched off lengthens the band on its own.
 --
 -- "band" ends on a dark hairline, so it stays narrow enough to read as a
--- stripe. "bandFaded" instead dissolves rightward, and that is what pays for
--- its width: a tail that costs nothing visually can be twice as wide, wide
--- enough to read as the icon it actually is, and it washes UNDER the name
--- rather than pushing it aside.
+-- stripe. "bandFaded" dissolves inward instead, and that is what pays for its
+-- width: a tail that costs nothing visually can run out to square. Both
+-- mirror onto the bar's other edge as the "Right" pair.
 --
 -- These are whole pixels on purpose. The offsets are UI units, not device
 -- pixels, so a fractional one lands mid-pixel and softens the icon's edge
 -- instead of moving it -- there is no half step here worth having.
+-- ---------------------------------------------------------------------------
+
 local ICON_SCALE = 0.78
-local ICON_PAD_X = 0
-local ICON_PAD_Y = 1
 
--- Where the name restarts when the band has taken the corner its anchor used
--- to hang off. Matches where the client itself leaves the name when it has no
--- role icon to show: its own 3px inset plus the 1px the hidden icon collapses
--- to.
-local NAME_ORPHAN_X = 4
-
--- `width`       strip width, and the mark of a band style; absent means corner.
--- `side`        which edge of the health bar it runs down; LEFT when absent.
--- `edge`        finish with the dark hairline on the strip's inner side.
--- `fadeFrom`    gradient alpha at the strip's outer edge, fading to `fadeTo`
---               at its inner one. Absent means flat.
--- `nameGap`     px of daylight between the strip and the name, for a name the
---               client has hung off the role icon.
--- `nameRebase`  re-point that name anchor at the frame instead. Required
---               whenever the strip is not a small thing sitting to the name's
---               left: a right band would anchor the name's left edge past its
---               own right one, and a square-wide left band would drag the name
---               halfway across the frame. Leaving the anchor alone is what
---               INDENTS the name, not what leaves it be.
--- `pullRight`   px the right-hand text anchors come in by.
--- `statusShift` px the status text's left anchor moves out by.
+-- Where the name goes once a band has taken over the corner. The client's icon
+-- is invisible under our stand-in but still 17px wide, and the name is anchored
+-- off its edge, so left to itself the name keeps an indent for an icon nobody
+-- can see -- which is a lot of daylight on a 72px frame.
 --
--- Both faded styles wash under the text rather than moving it: the status text
--- is left exactly where the client put it, and the name is put back where the
--- client would put it with no icon beside it at all.
+-- Given as an absolute inset from the frame rather than a nudge, so it says
+-- where the name lands rather than how far it moved, and re-stated as the
+-- client's own no-icon spot (its 3px inset plus the 1px a hidden icon collapses
+-- to) when there is nothing in the way at all. A band that fades has nothing in
+-- the way; an opaque one wants clearing by a couple of pixels.
+local NAME_CLEAR_X = 4
+local NAME_TOP_Y = -3
+
+-- What a band draws for a player the board says nothing about: the question
+-- mark this addon already uses for "unknown" everywhere else (Assignments.lua's
+-- custom target, SectionKit, the role customizer, Data.lua's icon fallback).
+-- Ordinary icon art at icon proportions, so it takes the same trim and mask as
+-- the spec icons beside it, and it says the honest thing -- not "this raider is
+-- damage" but "we do not know yet".
+--
+-- The corner style deliberately has no equivalent: see STYLES below.
+local UNKNOWN_ICON = 134400 -- INV_Misc_QuestionMark
+
+-- `width`     strip width, and the mark of a band style; absent means corner.
+-- `side`      which edge of the health bar it runs down; LEFT when absent.
+-- `edge`      finish with the dark hairline on the strip's inner side.
+-- `fadeFrom`  gradient alpha at the strip's outer edge, fading to `fadeTo` at
+--             its inner one. Absent means flat.
+-- `circle`    mask the icon round and ring it, for the corner.
+-- `unknown`   what to draw for a player with no board role. Absent means draw
+--             NOTHING for them -- which for the corner style is the whole
+--             point: it replaces the client's icon, so standing down is what
+--             lets the client's own group role show through untouched. We
+--             never have to reproduce that icon or reason about drawing over
+--             it, because the one we would be covering is simply left alone.
+-- `nameLeft`  absolute inset for the name's left anchor; absent leaves it.
+-- `nameRight` the same for its right anchor, to keep a name off an opaque
+--             strip running down that side.
 local STYLES = {
-    corner = {},
-    band = { width = 12, edge = true, nameGap = 4, statusShift = 4 },
-    bandFaded = { width = 30, fadeFrom = 0.6, fadeTo = 0, nameRebase = true },
-    bandRight = {
-        width = 12, side = "RIGHT", edge = true,
-        nameRebase = true, pullRight = 14,
-    },
+    corner = { circle = true },
+    band = { width = 12, edge = true, unknown = UNKNOWN_ICON, nameLeft = 15 },
+    bandFaded = { width = 30, fadeFrom = 0.6, fadeTo = 0,
+        unknown = UNKNOWN_ICON, nameLeft = NAME_CLEAR_X },
+    bandRight = { width = 12, side = "RIGHT", edge = true,
+        unknown = UNKNOWN_ICON, nameLeft = NAME_CLEAR_X, nameRight = -15 },
     bandRightFaded = {
         width = 30, side = "RIGHT", fadeFrom = 0.6, fadeTo = 0,
-        nameRebase = true,
+        unknown = UNKNOWN_ICON, nameLeft = NAME_CLEAR_X,
     },
 }
 
--- Padding on whichever side the client padded. Its layouts inset from the
--- top-left by 3,-2 and from the top-right by -3,-2, so the sign of the offset
--- it chose is what says which way "into the frame" is.
-local function PadLike(offset, pad)
-    if offset > 0 then return pad end
-    if offset < 0 then return -pad end
-    return 0
+-- Where our corner icon goes, given the offset and size the client uses for
+-- its own. We CENTRE on it rather than padding off the corner: a square could
+-- sit tight into the angle and look deliberate, but a disc with a ring around
+-- it reads as hanging off the frame there -- too high and too far out on both
+-- axes at once, since a circle's corner is empty. The client's icon is the
+-- spot the eye already expects, so the honest answer is to occupy it.
+--
+-- Sign-aware, so it works from whichever corner the layout chose: the offset
+-- always points inward from that corner, so nudging it further from zero is
+-- always "further into the frame".
+--
+-- `offset`/`theirSize` describe the client's icon, `iconSize`/`ring` ours.
+-- Centres the icon-plus-ring box on theirs, then steps in past the ring so the
+-- answer is where the ICON goes -- the ring is anchored to the icon, so it has
+-- to be counted here or the disc hangs a pixel further out than the circle
+-- inside it looks like it should.
+local function CornerOffset(offset, theirSize, iconSize, ring)
+    local inset = (theirSize - (iconSize + ring * 2)) / 2 + ring
+    if offset < 0 then return offset - inset end
+    return offset + inset
 end
 
--- Which style to draw, and whether this frame can even carry it. The band
--- needs a measurable health bar to span; without one there is nothing to
--- anchor a strip to, so that frame quietly keeps the corner.
+-- Which style to draw, and whether this frame can carry it. A band needs a
+-- measurable health bar to run down; without one there is nothing to anchor a
+-- strip to, so that frame quietly keeps the corner.
 local function StyleFor(frame)
     local db = WhoDoesWhat.db
     -- Same fallback the settings dropdown falls back to, so a missing saved
     -- value can never draw one style while the window ticks another.
-    local key = db and db.profile.settings.raidFrameRoleIconStyle or "bandFaded"
+    local key = db and db.profile.settings.raidFrameRoleIconStyle or "corner"
     local style = STYLES[key]
     if not (style and style.width) then return "corner", STYLES.corner end
     local bar = frame.healthBar
@@ -118,162 +158,13 @@ local function StyleFor(frame)
     return key, style, height
 end
 
--- Show only the middle slice of the icon, as wide as the strip is relative to
--- its height: the art is square, so drawing it at the band's height would make
--- it the band's height WIDE too, and everything past the strip has to be
--- masked off rather than squashed in. Cropping the texcoords the texture
--- already carries -- rather than computing a rect from scratch -- is what
--- keeps this working for a custom role wearing a micro role ATLAS, whose
--- coordinates address a sub-rect of a shared sheet and not the whole file.
-local function CapturePoints(region)
-    local points = {}
-    for i = 1, region:GetNumPoints() do
-        local point, relativeTo, relativePoint, x, y = region:GetPoint(i)
-        points[i] = { point, relativeTo or region:GetParent(), relativePoint, x, y }
-    end
-    return points
-end
-
--- Re-apply one region's captured anchors under a style's text rules. A style
--- with no rules restores them verbatim, which is how both the faded styles and
--- the release path put everything back.
---
--- Anchors that name neither edge are left alone throughout -- that is what
--- keeps the centred name of the buffs-top layout centred rather than dragging
--- it sideways.
-local function ApplyTextPoints(frame, key, region, points, style)
-    local roleIcon = frame.roleIcon
-    region:ClearAllPoints()
-    for _, p in ipairs(points) do
-        local point, relativeTo, relativePoint, x, y = p[1], p[2], p[3], p[4], p[5]
-        local left = point:find("LEFT", 1, true)
-        if key == "name" and left and relativeTo == roleIcon then
-            -- The client hangs the name off the role icon's inner edge, so the
-            -- name follows our strip whether we want it to or not. A narrow
-            -- left band can ride that and just ask for a gap; anything else
-            -- has to be cut loose -- a right band would anchor the name's LEFT
-            -- edge past its own right one and collapse the string, and a
-            -- square-wide band would shove the name halfway across the frame.
-            if style.nameRebase then
-                relativeTo, relativePoint, x = frame, point, NAME_ORPHAN_X
-            elseif style.nameGap then
-                x = x + style.nameGap
-            end
-        elseif key == "statusText" and left and style.statusShift then
-            x = x + style.statusShift
-        end
-        if style.pullRight and point:find("RIGHT", 1, true) then
-            x = x - style.pullRight
-        end
-        region:SetPoint(point, relativeTo, relativePoint, x, y)
-    end
-end
-
--- Lay the frame's text out for a style, or put it back. Only ever on a change:
--- in corner style this settles on the client's own anchors after one pass and
--- then costs a comparison.
-local TEXT_REGIONS = { "name", "statusText" }
-
-local function SetTextLayout(frame, h, key, style)
-    if h.textStyle == key then return end
-    -- Never touched, and not being asked to: a style with no text rules has no
-    -- business reaching into the client's layout, so don't even capture it.
-    if not (style.nameGap or style.nameRebase or style.pullRight
-        or style.statusShift or h.textPoints) then
-        h.textStyle = key
-        return
-    end
-    h.textPoints = h.textPoints or {}
-    for _, region_key in ipairs(TEXT_REGIONS) do
-        local region = frame[region_key]
-        if region and region.GetNumPoints and region:GetNumPoints() > 0 then
-            h.textPoints[region_key] = h.textPoints[region_key]
-                or CapturePoints(region)
-            ApplyTextPoints(frame, region_key, region,
-                h.textPoints[region_key], style)
-        end
-    end
-    h.textStyle = key
-end
-
 -- ---------------------------------------------------------------------------
--- Band finishes: the hairline and the fade
+-- Painting one texture: trim, mask, fade
 -- ---------------------------------------------------------------------------
-
--- A dark hairline down the right side of the narrow band, so the art ends on a
--- line instead of bleeding into the health bar. The client's role icon is a
--- bare texture with no border of its own, so this is one we create -- kept in
--- a table of ours rather than stamped onto the frame, and reused and re-hidden
--- rather than made again, since these frames outlive any one raid.
---
--- OVERLAY, a layer above the icon it edges: same layer would leave which one
--- wins to draw order, and the point of the line is that nothing covers it.
-local BAND_EDGE_WIDTH = 1
-local BAND_EDGE_COLOR = { 0.15, 0.15, 0.15, 1 }
-local edges = {}
-
-local function SetBandEdge(frame, style)
-    local edge = edges[frame]
-    if not (style and style.width and style.edge) then
-        if edge then edge:Hide() end
-        return
-    end
-    if not edge then
-        edge = frame:CreateTexture(nil, "OVERLAY")
-        if edge.SetColorTexture then
-            edge:SetColorTexture(unpack(BAND_EDGE_COLOR))
-        else
-            edge:SetTexture("Interface\\Buttons\\WHITE8X8")
-            edge:SetVertexColor(unpack(BAND_EDGE_COLOR))
-        end
-        edges[frame] = edge
-    end
-    -- Always the strip's inner side, the one facing the middle of the frame.
-    local mine, theirs = "LEFT", "RIGHT"
-    if style.side == "RIGHT" then mine, theirs = "RIGHT", "LEFT" end
-    edge:ClearAllPoints()
-    edge:SetPoint("TOP" .. mine, frame.roleIcon, "TOP" .. theirs, 0, 0)
-    edge:SetPoint("BOTTOM" .. mine, frame.roleIcon, "BOTTOM" .. theirs, 0, 0)
-    edge:SetWidth(BAND_EDGE_WIDTH)
-    edge:Show()
-end
-
--- Fade the band out to the right, or flatten it back to plain opaque. Only on
--- a change, since a gradient sticks to the region until something replaces it.
--- Colour objects are cached rather than built per call: this runs per frame
--- per repaint, and fresh tables at that rate are exactly the litter the
--- repaint budget was cleaned up to avoid.
-local colors = {}
-
-local function Alpha(a)
-    local color = colors[a]
-    if not color then
-        color = CreateColor(1, 1, 1, a)
-        colors[a] = color
-    end
-    return color
-end
-
-local function SetFade(texture, h, style)
-    local from = style.fadeFrom
-    -- The gradient runs outer-edge-inward, so which end holds the solid alpha
-    -- depends on the side the strip is on.
-    local wanted = from and ((style.side or "LEFT") .. from) or false
-    if h.fade == wanted then return end
-    if not (texture.SetGradient and CreateColor) then return end
-    if from then
-        local outer, inner = Alpha(from), Alpha(style.fadeTo or 0)
-        if style.side == "RIGHT" then outer, inner = inner, outer end
-        texture:SetGradient("HORIZONTAL", outer, inner)
-    else
-        texture:SetGradient("HORIZONTAL", Alpha(1), Alpha(1))
-    end
-    h.fade = wanted
-end
 
 -- Ability icons carry a rounded bevel baked into the art, so a texture drawn
--- at its full coordinates shows that border instead of filling with the
--- symbol -- worse the smaller it is drawn, and a band is mostly border.
+-- at its full coordinates shows that border instead of filling with the symbol
+-- -- worse the smaller it is drawn, and a band is mostly border.
 --
 -- Trimmed by the same 7% the rest of the addon trims its icons by (Data.lua's
 -- ApplyStatusCheckIcon, and every icon row under Views/), so these match the
@@ -297,8 +188,16 @@ local function TrimIconBorder(texture)
         ulY + down * ICON_TRIM, llY - down * ICON_TRIM)
 end
 
--- Never called with a width past the height -- a band is clamped square, so
--- the widest it ever gets is the whole icon at its own aspect, uncropped.
+-- Show only the middle slice of the icon, as wide as the strip is relative to
+-- its height: the art is square, so drawing it at the band's height would make
+-- it the band's height WIDE too, and everything past the strip has to be
+-- masked off rather than squashed in. Cropping the coordinates the texture
+-- already carries -- rather than computing a rect from scratch -- is what
+-- keeps this working for a custom role wearing a micro role ATLAS, whose
+-- coordinates address a sub-rect of a shared sheet and not a whole file.
+--
+-- Never called with a width past the height: a band is clamped square, so the
+-- widest it ever gets is the whole icon at its own aspect, uncropped.
 local function MaskToWidth(texture, width, height)
     if width >= height then return end
     local ulX, ulY, llX, llY, urX = texture:GetTexCoord()
@@ -308,18 +207,255 @@ local function MaskToWidth(texture, width, height)
     texture:SetTexCoord(middle - half, middle + half, ulY, llY)
 end
 
-local frames = {}  -- every compact frame our hook has run for
-local applied = {} -- frame -> the role icon we last drew there, nil when none
+-- Fade a band out towards the middle of the frame, or leave it flat. Colour
+-- objects are cached rather than built per call: this runs per frame per
+-- repaint, and fresh tables at that rate are exactly the litter the repaint
+-- budget was cleaned up to avoid.
+local colors = {}
 
--- What the client had in this corner before we took it over -- the size it
--- laid the texture out at and its own anchor -- plus the anchor we put in its
--- place, so we can tell our own handiwork from a fresh layout of its. A record
--- here means our icon is in that corner, and it is the ONLY thing our size is
--- ever derived from. The
--- client's update reads the size back off the texture and carries it forward,
--- so measuring what we last drew and taking another tenth off it would walk
--- the icon down to nothing over a handful of repaints.
-local held = {}
+local function Alpha(a)
+    local color = colors[a]
+    if not color then
+        color = CreateColor(1, 1, 1, a)
+        colors[a] = color
+    end
+    return color
+end
+
+local function SetFade(texture, style)
+    if not (texture.SetGradient and CreateColor) then return end
+    local from = style.fadeFrom
+    if not from then
+        -- Stated flat rather than skipped: this texture is ours and it is
+        -- pooled, so it may be carrying the last style's gradient.
+        texture:SetGradient("HORIZONTAL", Alpha(1), Alpha(1))
+        return
+    end
+    -- The gradient runs outer-edge-inward, so which end holds the solid alpha
+    -- depends on the side the strip is on.
+    local outer, inner = Alpha(from), Alpha(style.fadeTo or 0)
+    if style.side == "RIGHT" then outer, inner = inner, outer end
+    texture:SetGradient("HORIZONTAL", outer, inner)
+end
+
+-- ---------------------------------------------------------------------------
+-- Our regions
+--
+-- Two textures per frame, both created on demand and then reused and hidden
+-- rather than made again -- these frames outlive any one raid. Kept in tables
+-- of ours rather than stamped onto the client's frame.
+-- ---------------------------------------------------------------------------
+
+local icons = {} -- frame -> the texture we draw the spec icon into
+local rings = {} -- frame -> the dark disc behind a circled corner icon
+local edges = {} -- frame -> the hairline down a narrow band's inner side
+local taken = {} -- frame -> true while our stand-in is up
+local shown = {} -- frame -> the icon we last drew there
+
+local BAND_EDGE_WIDTH = 1
+local BAND_EDGE_COLOR = { 0.15, 0.15, 0.15, 1 }
+
+-- The corner icon is masked round, and its border is not a ring texture but a
+-- dark disc behind it, a pixel wider all round -- the part that sticks out IS
+-- the ring. A drawn ring would need art at exactly our size to stay even; a
+-- disc is one colour and stays a hairline at any size.
+--
+-- Both discs use the client's portrait alpha mask, the same one the round unit
+-- portraits are cut with, so the two circles are concentric by construction.
+local CIRCLE_MASK = "Interface\\CharacterFrame\\TempPortraitAlphaMask"
+local RING_WIDTH = 1
+local RING_COLOR = { 0.15, 0.15, 0.15, 1 }
+
+-- Masks are per-texture, since each one is sized to the texture it cuts, and a
+-- pooled texture switching to a band style has to put the square back.
+local function SetCircleMask(texture, wanted)
+    if not (texture.AddMaskTexture and texture.RemoveMaskTexture) then return end
+    local mask = texture.wdwCircleMask
+    if not wanted then
+        if mask and texture.wdwMasked then
+            texture:RemoveMaskTexture(mask)
+            texture.wdwMasked = false
+        end
+        return
+    end
+    if not mask then
+        local parent = texture:GetParent()
+        if not parent.CreateMaskTexture then return end
+        mask = parent:CreateMaskTexture()
+        -- Clamped to black on both axes, or the mask tiles and the corners of
+        -- the square come back.
+        mask:SetTexture(CIRCLE_MASK,
+            "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+        texture.wdwCircleMask = mask
+    end
+    mask:ClearAllPoints()
+    mask:SetAllPoints(texture)
+    if not texture.wdwMasked then
+        texture:AddMaskTexture(mask)
+        texture.wdwMasked = true
+    end
+end
+
+local function SetCornerRing(frame, style, icon, size)
+    local ring = rings[frame]
+    if not (style.circle and size) then
+        if ring then ring:Hide() end
+        return
+    end
+    if not ring then
+        -- A sublevel below the icon: same layer, so it tracks it, but behind.
+        ring = frame:CreateTexture(nil, "ARTWORK", nil, 0)
+        if ring.SetColorTexture then
+            ring:SetColorTexture(unpack(RING_COLOR))
+        else
+            ring:SetTexture("Interface\\Buttons\\WHITE8X8")
+            ring:SetVertexColor(unpack(RING_COLOR))
+        end
+        rings[frame] = ring
+    end
+    ring:ClearAllPoints()
+    ring:SetPoint("CENTER", icon, "CENTER", 0, 0)
+    ring:SetSize(size + RING_WIDTH * 2, size + RING_WIDTH * 2)
+    SetCircleMask(ring, true)
+    ring:Show()
+end
+
+-- ARTWORK one sublevel up: the same layer the client's own role icon and name
+-- live in, drawn just above them, which is where its role icon already sat.
+local function IconTexture(frame)
+    local texture = icons[frame]
+    if not texture then
+        texture = frame:CreateTexture(nil, "ARTWORK", nil, 1)
+        icons[frame] = texture
+    end
+    return texture
+end
+
+local function SetBandEdge(frame, style)
+    local edge = edges[frame]
+    if not (style and style.width and style.edge) then
+        if edge then edge:Hide() end
+        return
+    end
+    if not edge then
+        -- OVERLAY, a layer above the icon it edges: the same layer would leave
+        -- which one wins to draw order, and the point of a line is that
+        -- nothing covers it.
+        edge = frame:CreateTexture(nil, "OVERLAY")
+        if edge.SetColorTexture then
+            edge:SetColorTexture(unpack(BAND_EDGE_COLOR))
+        else
+            edge:SetTexture("Interface\\Buttons\\WHITE8X8")
+            edge:SetVertexColor(unpack(BAND_EDGE_COLOR))
+        end
+        edges[frame] = edge
+    end
+    -- Always the strip's inner side, the one facing the middle of the frame.
+    local mine, theirs = "LEFT", "RIGHT"
+    if style.side == "RIGHT" then mine, theirs = "RIGHT", "LEFT" end
+    local icon = icons[frame]
+    edge:ClearAllPoints()
+    edge:SetPoint("TOP" .. mine, icon, "TOP" .. theirs, 0, 0)
+    edge:SetPoint("BOTTOM" .. mine, icon, "BOTTOM" .. theirs, 0, 0)
+    edge:SetWidth(BAND_EDGE_WIDTH)
+    edge:Show()
+end
+
+-- ---------------------------------------------------------------------------
+-- The name
+--
+-- The one thing we still move on the client's side, and the only one it cannot
+-- work out for itself: its icon is invisible but still occupies the corner, so
+-- the name has no way of knowing the indent it is keeping is for nothing.
+--
+-- Captured before the first move and re-applied verbatim on release, and only
+-- ever a re-anchor -- nothing here resizes anything, so the worst a mistake
+-- can do is put a name in the wrong place, not lose one.
+--
+-- Anchors that name neither edge are left alone, which keeps the centred name
+-- of the buffs-top layout centred rather than dragging it sideways.
+-- ---------------------------------------------------------------------------
+
+local namePoints = {} -- frame -> the client's own anchors for frame.name
+local nameStyle = {}  -- frame -> the style key those anchors are laid out for
+
+-- Is the name currently hung off the role icon? That is the client's own
+-- doing and nothing else's -- we only ever anchor it to the frame -- which
+-- makes it an exact answer to "has the client re-laid-this-out since we last
+-- touched it", with no state of ours to go stale.
+--
+-- It re-lays it out more often than is obvious: building the frames for a
+-- group that is still forming, and reflowing the container when a role change
+-- re-sorts it. A cached "already done" misses both, which is why one player
+-- changing role used to un-indent every name in the raid at once, and why a
+-- freshly formed group left your own name behind.
+local function NameHangsOffIcon(frame)
+    local name = frame.name
+    for i = 1, name:GetNumPoints() do
+        local _, relativeTo = name:GetPoint(i)
+        if relativeTo == frame.roleIcon then return true end
+    end
+    return false
+end
+
+local function ApplyNamePoints(frame, points, style)
+    local name = frame.name
+    name:ClearAllPoints()
+    for _, p in ipairs(points) do
+        local point, relativeTo, relativePoint, x, y = p[1], p[2], p[3], p[4], p[5]
+        local inset = style and (
+            (point:find("LEFT", 1, true) and style.nameLeft)
+            or (point:find("RIGHT", 1, true) and style.nameRight))
+        if inset then
+            -- Re-anchored onto the frame, so the y has to be re-stated too:
+            -- the captured one is measured from the ICON's top, and the icon
+            -- already sits 2px below the frame's. Carrying it across unchanged
+            -- is what floats the name high.
+            relativeTo, relativePoint, x, y = frame, point, inset, NAME_TOP_Y
+        end
+        name:SetPoint(point, relativeTo, relativePoint, x, y)
+    end
+end
+
+local function SetNameLayout(frame, key, style)
+    local name = frame.name
+    if not name then return end
+    local wants = style and (style.nameLeft or style.nameRight)
+
+    if not wants then
+        -- Nothing to move. Put back anything we moved before, once, and then
+        -- leave the client's own layout entirely alone.
+        local points = namePoints[frame]
+        if points and nameStyle[frame] ~= key then
+            ApplyNamePoints(frame, points, nil)
+        end
+        nameStyle[frame] = key
+        return
+    end
+
+    -- Whatever the client last laid out is the baseline we owe back, so a
+    -- re-layout is re-captured rather than fought.
+    local fresh = NameHangsOffIcon(frame)
+    if fresh then
+        if name:GetNumPoints() == 0 then return end
+        local points = {}
+        for i = 1, name:GetNumPoints() do
+            local point, relativeTo, relativePoint, x, y = name:GetPoint(i)
+            points[i] = { point, relativeTo or frame, relativePoint, x, y }
+        end
+        namePoints[frame] = points
+    end
+    local points = namePoints[frame]
+    if not points then return end
+    if fresh or nameStyle[frame] ~= key then
+        ApplyNamePoints(frame, points, style)
+        nameStyle[frame] = key
+    end
+end
+
+-- ---------------------------------------------------------------------------
+-- What to draw, and for whom
+-- ---------------------------------------------------------------------------
 
 -- Both switches, asked together because every draw decision needs both. The
 -- combat one is not a restriction we are working around -- a texture carries
@@ -349,144 +485,141 @@ end
 -- them: no unit, not a player, no role, or a saved role id that no longer
 -- resolves. Auto-assignment writes a scanned spec into the same store a hand
 -- pick uses (TalentScanning.lua), so both arrive here as one lookup.
-local function RoleIconFor(unit)
+local function RoleIconFor(unit, style)
     if not (unit and UnitExists(unit) and UnitIsPlayer(unit)) then return nil end
+    -- Never on a target or target-of-target frame. The raid container can show
+    -- the main tanks' and assists' targets alongside the roster, and those are
+    -- the same raiders a second time: a badge there is a duplicate of one
+    -- already on the list, and the name shifting under it is worse. Any unit
+    -- token with "target" in it is derived from somebody else's target, so one
+    -- test covers maintank1target and targettarget alike.
+    if unit:find("target", 1, true) then return nil end
     local key = UnitKey(unit)
     local roleId = key and WhoDoesWhat:GetAssignedRole(key)
-    if not roleId then return nil end
-    local _, role = WhoDoesWhat:FindRoleById(roleId)
-    return role and role.icon or nil
+    if roleId then
+        local _, role = WhoDoesWhat:FindRoleById(roleId)
+        if role and role.icon then return role.icon end
+    end
+    -- Nothing on the board for them -- a raider without the addon, or one
+    -- nobody has placed yet. A band marks them unknown; the corner style stands
+    -- down entirely and lets the client's own role icon have the spot back.
+    return style and style.unknown or nil
 end
 
--- SetRoleIconTexture rather than SetTexture: a custom role may wear one of the
--- client's micro role ATLASES, which SetTexture renders blank (see Data.lua).
---
--- Sizing this ourselves is not optional even without the scale. Everything the
--- client draws here is an atlas, and when it has nothing to draw it hides the
--- texture AND narrows it to 1px -- the name string is anchored to its right
--- edge, so the corner has to collapse or every icon-less frame would carry an
--- indent. It widens it back to a square whenever it does draw, and so must we,
--- or our icon is a sliver on exactly the players it had nothing to say about.
---
--- The anchor is re-read rather than trusted, because a raid-profile change
--- re-runs the client's layout and puts its own anchor back underneath us.
--- Anything that isn't the anchor we ourselves last set is therefore the
--- client's, and worth saving to hand back -- an exact comparison rather than a
--- guess from the offsets, since ours are only a couple of pixels off its own.
--- It also means a layout that moved this corner from the left to the right
--- carries us with it instead of pinning the icon to the wrong side.
---
--- Only the anchor is conditional. Texture, size and mask are re-applied every
--- time, because the client's update runs immediately before this one and sets
--- a size of its own on every pass -- including the 1px-wide collapse, which
--- would otherwise eat the band.
-local function Anchor(frame, h, key, style)
+-- ---------------------------------------------------------------------------
+-- Draw and release
+-- ---------------------------------------------------------------------------
+
+local function Draw(frame, icon, key, style, bandHeight)
     local roleIcon = frame.roleIcon
-    roleIcon:ClearAllPoints()
+    local texture = IconTexture(frame)
+    local cornerSize
+
+    texture:ClearAllPoints()
     if style.width then
+        -- Never wider than it is tall. A band past square would have to
+        -- stretch the art sideways or crop it top and bottom, and both are
+        -- worse than simply stopping at the whole icon.
+        local width = math.min(style.width, bandHeight)
         local corner = style.side == "RIGHT" and "TOPRIGHT" or "TOPLEFT"
-        roleIcon:SetPoint(corner, frame.healthBar, corner, 0, 0)
-        h.setPoint, h.setRelativeTo, h.setX, h.setY =
-            corner, frame.healthBar, 0, 0
+        texture:SetPoint(corner, frame.healthBar, corner, 0, 0)
+        texture:SetSize(width, bandHeight)
+        WhoDoesWhat:SetRoleIconTexture(texture, icon)
+        -- Trim first, mask second: the mask narrows whatever rect it finds, so
+        -- the other way round would crop the band out of the bevel.
+        TrimIconBorder(texture)
+        MaskToWidth(texture, width, bandHeight)
     else
-        roleIcon:SetPoint(h.point, h.relativeTo, h.relativePoint,
-            PadLike(h.x, ICON_PAD_X), PadLike(h.y, ICON_PAD_Y))
-        h.setPoint, h.setRelativeTo = h.point, h.relativeTo
-        h.setX, h.setY = PadLike(h.x, ICON_PAD_X), PadLike(h.y, ICON_PAD_Y)
-    end
-    h.setStyle = key
-end
-
-local function Draw(frame, icon)
-    local roleIcon = frame.roleIcon
-    local h = held[frame]
-    if not h then
-        h = { size = roleIcon:GetHeight() }
-        held[frame] = h
-    end
-    local key, style, bandHeight = StyleFor(frame)
-    -- Never wider than it is tall. A band past square would have to stretch
-    -- the art sideways or crop it top and bottom, and both are worse than
-    -- simply stopping at the whole icon.
-    local width = style.width and math.min(style.width, bandHeight) or nil
-
-    local point, relativeTo, relativePoint, x, y = roleIcon:GetPoint(1)
-    local ours = point == h.setPoint and relativeTo == h.setRelativeTo
-        and x == h.setX and y == h.setY
-    if point and not ours then
-        -- The client's own anchor, and the one we owe it back. Its layout
-        -- moves the text with the icon, so a pass of its own has undone our
-        -- shift too -- drop the record of it and let it be re-applied.
-        h.point, h.relativeTo, h.relativePoint, h.x, h.y =
-            point, relativeTo or frame, relativePoint, x, y
-        h.textStyle = nil
-    end
-    if h.point and (not ours or h.setStyle ~= key) then
-        Anchor(frame, h, key, style)
+        -- Sit where the client put its own icon, at our scale. Read, never
+        -- written: its geometry stays its own, which is what makes these
+        -- numbers trustworthy every single pass rather than something we had
+        -- to record before we spoilt it.
+        --
+        local point, relativeTo, relativePoint, x, y = roleIcon:GetPoint(1)
+        local theirSize = roleIcon:GetHeight()
+        local size = math.floor(theirSize * ICON_SCALE + 0.5)
+        if not (point and size > 0) then
+            texture:Hide()
+            return
+        end
+        local ring = style.circle and RING_WIDTH or 0
+        texture:SetPoint(point, relativeTo or frame, relativePoint,
+            CornerOffset(x, theirSize, size, ring),
+            CornerOffset(y, theirSize, size, ring))
+        texture:SetSize(size, size)
+        WhoDoesWhat:SetRoleIconTexture(texture, icon)
+        TrimIconBorder(texture)
+        cornerSize = size
     end
 
-    SetTextLayout(frame, h, key, style)
-    SetFade(roleIcon, h, style)
+    -- The round cut goes on last of the texture work: it is a mask, not a
+    -- coordinate, so it survives the texture and trim above rather than being
+    -- undone by them -- but it has to be taken off again for a band, since
+    -- this texture is pooled across styles.
+    SetCircleMask(texture, style.circle and true or false)
+    SetCornerRing(frame, style, texture, cornerSize)
+    SetFade(texture, style)
     SetBandEdge(frame, style)
-    WhoDoesWhat:SetRoleIconTexture(roleIcon, icon)
-    -- Trim first, mask second: the mask narrows whatever rect it finds, so
-    -- running it the other way round would crop the band out of the bevel.
-    TrimIconBorder(roleIcon)
-    if width then
-        roleIcon:SetSize(width, bandHeight)
-        MaskToWidth(roleIcon, width, bandHeight)
-    else
-        local size = math.floor(h.size * ICON_SCALE + 0.5)
-        roleIcon:SetSize(size, size)
-    end
-    roleIcon:Show()
-    applied[frame] = icon
+    SetNameLayout(frame, key, style)
+    texture:Show()
+    -- The client's icon goes invisible, not away: it keeps its size, its
+    -- anchor and the name hanging off it, and every one of those stays right
+    -- without us touching it.
+    roleIcon:SetAlpha(0)
+    taken[frame] = true
+    shown[frame] = icon
 end
 
--- Give the corner back exactly as we found it. The client has already redrawn
--- its own icon by the time this runs -- it just did so at OUR size, since that
--- is the height it found on the texture -- so the size it would have set is
--- put back by hand here: square while it is showing something, collapsed to
--- 1px wide while it is not. Calling its update again instead would recurse,
--- because this runs inside the hook on it.
+-- Give the corner straight back. Nothing here depends on the client redrawing
+-- anything, which is the point: an alpha we set is an alpha we can unset, so
+-- this lands the moment the setting changes rather than at the next reload.
 local function Release(frame)
-    local h = held[frame]
-    if not h then return end
-    local roleIcon = frame.roleIcon
-    SetTextLayout(frame, h, "corner", STYLES.corner)
-    SetFade(roleIcon, h, STYLES.corner)
+    if not taken[frame] then return end
+    taken[frame] = nil
+    shown[frame] = nil
+    local texture = icons[frame]
+    if texture then texture:Hide() end
+    local ring = rings[frame]
+    if ring then ring:Hide() end
     SetBandEdge(frame, nil)
-    held[frame] = nil
-    if h.point then
-        roleIcon:ClearAllPoints()
-        roleIcon:SetPoint(h.point, h.relativeTo, h.relativePoint, h.x, h.y)
-    end
-    roleIcon:SetSize(roleIcon:IsShown() and h.size or 1, h.size)
+    SetNameLayout(frame, "corner", nil)
+    if frame.roleIcon then frame.roleIcon:SetAlpha(1) end
 end
 
--- Runs right after the client has finished drawing that corner, so it always
--- redraws -- whatever we had there a moment ago has just been overwritten.
+-- ---------------------------------------------------------------------------
+-- Staying current
+-- ---------------------------------------------------------------------------
+
+local frames = {}  -- every compact frame our hook has run for
+local styleOf = {} -- frame -> the style key we last drew there
+
+-- The client re-runs its role-icon update on every event that can change this
+-- corner -- roster changes, role flags, a frame being reused for a different
+-- unit -- so hooking it is what keeps us current without a ticker. We no
+-- longer need what it draws, only the news that something moved.
 local function OnUpdateRoleIcon(frame)
     if not (frame and frame.roleIcon) then return end
     frames[frame] = true
-    applied[frame] = nil
-    local icon = Enabled() and RoleIconFor(frame.unit)
+    local key, style, bandHeight = StyleFor(frame)
+    local icon = Enabled() and RoleIconFor(frame.unit, style)
     if icon then
-        Draw(frame, icon)
+        Draw(frame, icon, key, style, bandHeight)
+        styleOf[frame] = key
     else
         Release(frame)
+        styleOf[frame] = nil
     end
 end
 
 -- ---------------------------------------------------------------------------
 -- Board-driven repaints
 --
--- Nothing on Blizzard's side moves when OUR board does, so a role edit, an
--- arriving talent scan or a sync has to push. Leading edge, like
--- RequestFullRefresh: the first push after a quiet spell lands immediately and
--- everything inside the interval collapses into one catch-up -- this hangs off
--- RefreshBoardViews, which live buff tracking fires at up to 10Hz. Frames
--- whose icon hasn't changed cost a table lookup and nothing else.
+-- Nothing on the client's side moves when OUR board does, so a role edit, an
+-- arriving talent scan, a sync or a settings change has to push. Leading edge,
+-- like RequestFullRefresh: the first push after a quiet spell lands
+-- immediately and everything inside the interval collapses into one catch-up
+-- -- this hangs off RefreshBoardViews, which live buff tracking fires at up to
+-- 10Hz. Frames whose icon and style are unchanged cost two table lookups.
 -- ---------------------------------------------------------------------------
 
 local REFRESH_INTERVAL = 0.2
@@ -497,21 +630,18 @@ local function Sweep()
     local enabled = Enabled()
     for frame in pairs(frames) do
         if frame.roleIcon and frame.unit and frame:IsVisible() then
-            local icon = enabled and RoleIconFor(frame.unit) or nil
+            local key, style, bandHeight = StyleFor(frame)
+            local icon = enabled and RoleIconFor(frame.unit, style) or nil
             -- The style counts as a change too. Comparing the icon alone meant
             -- switching style repainted nothing at all: the same player still
-            -- resolves to the same icon, so every frame looked untouched and
-            -- the new shape waited for the next unrelated board edit.
-            local h = held[frame]
-            if icon ~= applied[frame]
-                or (icon and h and h.setStyle ~= StyleFor(frame)) then
+            -- resolves to the same icon, so every frame looked untouched.
+            if icon ~= shown[frame] or (icon and key or nil) ~= styleOf[frame] then
                 if icon then
-                    Draw(frame, icon)
+                    Draw(frame, icon, key, style, bandHeight)
+                    styleOf[frame] = key
                 else
-                    -- Nothing of ours to show any more: let the client redraw
-                    -- its own corner. That re-enters the hook above, which is
-                    -- what clears our record of the frame.
-                    CompactUnitFrame_UpdateRoleIcon(frame)
+                    Release(frame)
+                    styleOf[frame] = nil
                 end
             end
         end

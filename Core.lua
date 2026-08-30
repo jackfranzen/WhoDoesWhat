@@ -351,15 +351,17 @@ local defaults = {
             -- preference. Off hands the corner back for the fight and takes it
             -- again when the fight ends.
             raidFrameRoleIconsInCombat = true,
-            -- How that icon is shaped: "corner" is the small square in the
-            -- corner the client lays its own role icon out in; "band" is a
+            -- How that icon is shaped. "corner" ("Replace WoW Icon") is a
+            -- round one centred on the spot the client draws its own role icon
+            -- in, standing down entirely for a player we have no role for so
+            -- the client's own icon shows there; "band" is a
             -- narrow vertical strip down the left edge of the health bar,
             -- masked to the middle slice of the art and finished with a dark
             -- hairline; "bandFaded" is the same strip run out to square and
             -- dissolved inward, washing under the text instead of moving it.
             -- "bandRight"/"bandRightFaded" mirror the two onto the health
             -- bar's other edge. See RaidFrameExtensions.lua.
-            raidFrameRoleIconStyle = "bandFaded",
+            raidFrameRoleIconStyle = "corner",
             -- Also append the roster hover summary (paladin blessing talents,
             -- warlock healthstone) to that tooltip. Off by default: it is
             -- several lines, and most hovers do not want them.

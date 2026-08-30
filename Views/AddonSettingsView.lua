@@ -1165,7 +1165,7 @@ local function EnsureSettingsFrame()
     raidStyleLabel:SetPoint("TOPLEFT", CONTENT_X + 4, -(yL + 4))
     raidStyleLabel:SetText("Raid frame style:")
     local raidStyleLabels = {
-        corner = "Top-left icon",
+        corner = "Replace WoW Icon",
         band = "Left band",
         bandFaded = "Left band, faded",
         bandRight = "Right band",
@@ -1179,7 +1179,7 @@ local function EnsureSettingsFrame()
     WhoDoesWhat:StyleDropdown(raidStyleDD, true)
     UIDropDownMenu_Initialize(raidStyleDD, function(_, level)
         local saved = WhoDoesWhat.db.profile.settings.raidFrameRoleIconStyle
-            or "bandFaded"
+            or "corner"
         for _, mode in ipairs({ "corner", "band", "bandFaded",
             "bandRight", "bandRightFaded" }) do
             local info = UIDropDownMenu_CreateInfo()
@@ -1825,8 +1825,8 @@ function WhoDoesWhat:OpenAddonSettingsView(section)
     f.raidFrameRoleCheck:SetChecked(settings.raidFrameRoleIcons ~= false)
     f.raidFrameCombatCheck:SetChecked(settings.raidFrameRoleIconsInCombat ~= false)
     UIDropDownMenu_SetText(f.raidStyleDD,
-        f.raidStyleLabels[settings.raidFrameRoleIconStyle or "bandFaded"]
-            or f.raidStyleLabels.bandFaded)
+        f.raidStyleLabels[settings.raidFrameRoleIconStyle or "corner"]
+            or f.raidStyleLabels.corner)
     RefreshRaidFrameOptionStates(f)
     f.announceRoleCheck:SetChecked(settings.announceRoleChanges)
     f.manageBlizzRolesCheck:SetChecked(settings.manageBlizzardRoles ~= false)

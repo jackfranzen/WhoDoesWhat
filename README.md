@@ -18,7 +18,7 @@ Open one window with `/wdw` or the minimap button to organize tanks, crowd contr
 - **Warlock curses** - assign curses manually or automatically. TBC prefers an Affliction Warlock for Elements; Classic assigns Elements, Shadow, and Recklessness to separate Warlocks.
 - **Fast communication** - whisper one player's full job list, one section, or the whole board.
 - **Unit-menu controls** - set roles and manage tank, CC, and misdirect assignments from player right-click menus.
-- **Roles on raid frames** - each raider's spec icon is drawn onto Blizzard's raid frames, over the group icon usually shown there: as a small icon in the top-left corner, as a narrow band down the left edge of the health bar, or as a wider band that fades out under the name. Players whose spec has not been chosen or scanned keep the corner Blizzard drew. Settings > General picks the style, turns it off, or limits it to out of combat.
+- **Roles on raid frames** - each raider's spec icon is drawn onto Blizzard's raid frames, over the group icon usually shown there: as a round icon replacing the group icon, or as a band down either edge of the health bar, narrow and hard-edged or wider and fading out under the name. Players whose spec has not been chosen or scanned keep the corner Blizzard drew. Settings > General picks the style, turns it off, or limits it to out of combat.
 
 Warnings call out incomplete or conflicting assignments before the pull.
 
