@@ -132,7 +132,10 @@ local function GroupTargets()
             -- in range, so Sated has to be readable on a shadowfiend too. The
             -- consumers pick which pets they care about; an entry here only
             -- means the pet exists and has been scanned.
-            if UnitExists(o[2]) then
+            -- A Steam Tonk is not one of them (Core.lua): scanning it would
+            -- report the tonk's auras as the hunter pet's.
+            if UnitExists(o[2])
+                and not WhoDoesWhat:IsIgnoredPetName(GetUnitName(o[2], true)) then
                 targets[#targets + 1] = {
                     unit = o[2], key = key .. "'s Pet",
                     ownerUnit = o[1], ownerKey = key,

@@ -636,7 +636,11 @@ local function LivePetNames()
         if UnitExists(u.pet) then
             local owner = GetUnitName(u.owner, true)
             local petName = GetUnitName(u.pet, true)
-            if owner and petName then names[owner] = petName end
+            -- A Steam Tonk is not a pet: leaving it out here keeps it from
+            -- ever becoming a PallyPower target (Core.lua).
+            if owner and petName and not WhoDoesWhat:IsIgnoredPetName(petName) then
+                names[owner] = petName
+            end
         end
     end
     return names

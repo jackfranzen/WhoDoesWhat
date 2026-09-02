@@ -195,6 +195,20 @@ end
 -- frozen for the duration of a frame, which makes it exactly the right key.
 local petInfo, petInfoTime = {}, nil
 
+-- Units that occupy the pet slot without being a pet. The Steam Tonk
+-- Controller parks a "Steam Tonk" on `raidNpet` for five minutes: it takes no
+-- blessing, it is not the pet any plan is about, and it vanishes as abruptly
+-- as it arrived -- so every pet scan skips it and the hunter simply reads as
+-- having no pet summoned. Matched by name because that is all a tonk gives us
+-- (an enUS name; a localized client would see its own and let the tonk
+-- through, which is the pre-existing behaviour, not a regression).
+local IGNORED_PET_NAMES = { ["Steam Tonk"] = true }
+
+function WhoDoesWhat:IsIgnoredPetName(name)
+    if not name then return false end
+    return IGNORED_PET_NAMES[name:match("^([^%-]+)") or name] == true
+end
+
 function WhoDoesWhat:GetPetUnitInfo()
     if petInfoTime == GetTime() then return petInfo end
     local units = {}
@@ -208,7 +222,9 @@ function WhoDoesWhat:GetPetUnitInfo()
     for _, u in ipairs(units) do
         if UnitExists(u[2]) then
             local owner, name = GetUnitName(u[1], true), GetUnitName(u[2], true)
-            if owner and name then petInfo[owner] = { name = name, unit = u[2] } end
+            if owner and name and not self:IsIgnoredPetName(name) then
+                petInfo[owner] = { name = name, unit = u[2] }
+            end
         end
     end
     petInfoTime = GetTime()
