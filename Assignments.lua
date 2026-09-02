@@ -1344,6 +1344,13 @@ for i = 1, 6 do GRID_POS_VALUE[i] = (7 - i) * (7 - i) * 1000 end
 -- case that used to scatter their leftovers.
 local LADDER_BONUS = { 15, 6, 5, 4, 3, 2 }
 
+-- A hunter pet sits in the Warrior blessing bucket, so pairing a pet with the
+-- paladin whose Warrior Greater IS that blessing costs no extra cast. Worth
+-- more than any talent gap (max 50) so sharing beats a rank or two, and far
+-- under one position step (1000) so it never costs the pet a higher-priority
+-- blessing: Might > Kings > Light decides first, sharing only breaks the ties.
+local PET_GREATER_BONUS = 200
+
 local cachedBuffPlanKey, cachedBuffPlan
 
 -- Cheap deterministic key for every input to the expensive matching below.
@@ -1473,17 +1480,15 @@ local function ComputePaladinBuffPlan()
     -- consume, which the matcher below starts from -- so the rest of the
     -- paladins fill the raider's REMAINING wants instead of doubling up on a
     -- blessing that is already covered.
-    local function SeedLocked(order, unavailable)
+    local function SeedLocked(order)
         local cells, mask = {}, 0
         for _, lk in ipairs(locked) do
-            if not (unavailable and unavailable[lk.name]) then
-                for i, key in ipairs(order) do
-                    local ibit = bit.lshift(1, i - 1)
-                    if key == lk.buff and bit.band(mask, ibit) == 0 then
-                        cells[lk.name] = key
-                        mask = mask + ibit
-                        break
-                    end
+            for i, key in ipairs(order) do
+                local ibit = bit.lshift(1, i - 1)
+                if key == lk.buff and bit.band(mask, ibit) == 0 then
+                    cells[lk.name] = key
+                    mask = mask + ibit
+                    break
                 end
             end
         end
@@ -1496,8 +1501,11 @@ local function ComputePaladinBuffPlan()
     -- reaching it and the picks that did. Each paladin either sits out (mask
     -- unchanged) or takes one free position they can cast. Masks are walked
     -- numerically so equal-score ties resolve the same way every refresh.
-    local function SolveRaiderUncached(order, unavailable)
-        local seedCells, seedMask = SeedLocked(order, unavailable)
+    --
+    -- `greater` (pet rows only) maps paladin -> their Warrior class Greater,
+    -- the blessing a pet receives from them for free.
+    local function SolveRaiderUncached(order, greater)
+        local seedCells, seedMask = SeedLocked(order)
         local dp = { [seedMask] = { score = 0, picks = {} } }
         for p = 1, #pool do
             local name = pool[p]
@@ -1510,37 +1518,40 @@ local function ComputePaladinBuffPlan()
                     if not cur or st.score > cur.score then
                         ndp[mask] = st
                     end
-                    if not (unavailable and unavailable[name]) then
-                        for i = 1, #order do
-                            local ibit = bit.lshift(1, i - 1)
-                            local key = order[i]
-                            if bit.band(mask, ibit) == 0 and CanCast(name, key) then
-                                -- The +15 primary stickiness outweighs one talent
-                                -- rank but not two: near-ties consolidate on the
-                                -- primary owner, real rank gaps still win. The
-                                -- smaller ladder bonuses below it do the same for
-                                -- the fallbacks, so a paladin whose primary this
-                                -- raider doesn't want still lands on the same
-                                -- second (third, ...) choice they take everywhere
-                                -- else -- all of them under one rank step, so
-                                -- talent still decides when talent differs. A
-                                -- assign-rule pair scores +100 instead -- past
-                                -- any possible rank gap (max 50), so the user's
-                                -- pick holds; position values still dominate, so
-                                -- nobody is force-fed a buff they don't want.
-                                local rung = ladder[name] and ladder[name][key]
-                                local score = st.score + GRID_POS_VALUE[i]
-                                    + (BuffTalentRank(name, key) or 0) * 10
-                                    + (forced[name] == key and 100
-                                        or rung and LADDER_BONUS[rung] or 0)
-                                local nmask = mask + ibit
-                                local prev = ndp[nmask]
-                                if not prev or score > prev.score then
-                                    local picks = {}
-                                    for pp, ii in pairs(st.picks) do picks[pp] = ii end
-                                    picks[p] = i
-                                    ndp[nmask] = { score = score, picks = picks }
-                                end
+                    for i = 1, #order do
+                        local ibit = bit.lshift(1, i - 1)
+                        local key = order[i]
+                        if bit.band(mask, ibit) == 0 and CanCast(name, key) then
+                            -- The +15 primary stickiness outweighs one talent
+                            -- rank but not two: near-ties consolidate on the
+                            -- primary owner, real rank gaps still win. The
+                            -- smaller ladder bonuses below it do the same for
+                            -- the fallbacks, so a paladin whose primary this
+                            -- raider doesn't want still lands on the same
+                            -- second (third, ...) choice they take everywhere
+                            -- else -- all of them under one rank step, so
+                            -- talent still decides when talent differs. A
+                            -- assign-rule pair scores +100 instead -- past
+                            -- any possible rank gap (max 50), so the user's
+                            -- pick holds; position values still dominate, so
+                            -- nobody is force-fed a buff they don't want. A pet
+                            -- riding this paladin's Warrior Greater adds
+                            -- PET_GREATER_BONUS on top, above every rank gap
+                            -- and still under one position step.
+                            local rung = ladder[name] and ladder[name][key]
+                            local score = st.score + GRID_POS_VALUE[i]
+                                + (BuffTalentRank(name, key) or 0) * 10
+                                + (forced[name] == key and 100
+                                    or rung and LADDER_BONUS[rung] or 0)
+                                + (greater and greater[name] == key
+                                    and PET_GREATER_BONUS or 0)
+                            local nmask = mask + ibit
+                            local prev = ndp[nmask]
+                            if not prev or score > prev.score then
+                                local picks = {}
+                                for pp, ii in pairs(st.picks) do picks[pp] = ii end
+                                picks[p] = i
+                                ndp[nmask] = { score = score, picks = picks }
                             end
                         end
                     end
@@ -1564,7 +1575,7 @@ local function ComputePaladinBuffPlan()
         return cells
     end
 
-    -- The DP above is a pure function of (order, unavailable) -- everything
+    -- The DP above is a pure function of (order, greater) -- everything
     -- else it reads (pool, locked, ladder, forced) is fixed for this plan. A
     -- 40-man raid holds only a handful of DISTINCT orders (one per role/
     -- guarantee shape), so solving per raider re-derived the same answer
@@ -1578,20 +1589,13 @@ local function ComputePaladinBuffPlan()
     -- store it for DIFFERENT raiders -- so hand out a copy rather than letting
     -- two raiders alias one table.
     local solveMemo = {}
-    local function SolveRaider(order, unavailable)
-        local sig = table.concat(order, "\31")
-        if unavailable then
-            -- Pet rows pass a per-pet `used` set; fold it in, walked in pool
-            -- order so the signature is deterministic.
-            local marks = {}
-            for i = 1, #pool do
-                marks[i] = unavailable[pool[i]] and "1" or "0"
-            end
-            sig = sig .. "\30" .. table.concat(marks)
-        end
+    local function SolveRaider(order, greater)
+        -- Every pet row passes the same Warrior-Greater table (it is fixed for
+        -- the plan), so one flag separates the two solve flavours.
+        local sig = table.concat(order, "\31") .. (greater and "\30pet" or "")
         local hit = solveMemo[sig]
         if not hit then
-            hit = SolveRaiderUncached(order, unavailable)
+            hit = SolveRaiderUncached(order, greater)
             solveMemo[sig] = hit
         end
         local cells = {}
@@ -1609,36 +1613,25 @@ local function ComputePaladinBuffPlan()
         end
     end
 
-    -- First establish real Warrior Greaters, then build each pet row around
-    -- that inherited coverage. Remaining wants are exactly matched across the
-    -- unused paladins as Lesser exceptions. With no real Warrior assignment,
-    -- the ordinary pet solve below defines a pets-only Greater bucket.
+    -- Pets ride the Warrior Greaters, so establish the real ones first and
+    -- feed them to the pet solve as a scoring bonus rather than as a
+    -- pre-assignment: the pet's own priorities (Might > Kings > Light) are
+    -- matched across the FULL pool, and sharing a Warrior Greater only breaks
+    -- ties. Reserving the Greater paladin up front used to cost the pet a
+    -- better blessing -- the one Kings-talented paladin holding the Warrior
+    -- Might Greater was spent on Might, so the pet's second slot fell through
+    -- to Light with nobody left who could cast Kings. With no real Warrior
+    -- assignment there is nothing to inherit and the plain pet solve defines a
+    -- pets-only Greater bucket.
     local realGreater = ComputeGreaterAssignments(plan, targetClass, petTargets)
+    local warriorGreater = {}
+    for _, paladin in ipairs(pool) do
+        warriorGreater[paladin] = realGreater[paladin]
+            and realGreater[paladin].Warrior
+    end
     for _, pet in ipairs(GetPetMembers()) do
-        local order = PetBuffOrder(ignored, scoped, pet)
-        local cells, used, covered = {}, {}, {}
-        for _, paladin in ipairs(pool) do
-            local key = realGreater[paladin]
-                and realGreater[paladin].Warrior
-            if key and not covered[key] then
-                for _, wanted in ipairs(order) do
-                    if wanted == key then
-                        cells[paladin] = key
-                        used[paladin] = true
-                        covered[key] = true
-                        break
-                    end
-                end
-            end
-        end
-        local remaining = {}
-        for _, key in ipairs(order) do
-            if not covered[key] then remaining[#remaining + 1] = key end
-        end
-        for paladin, key in pairs(SolveRaider(remaining, used)) do
-            cells[paladin] = key
-        end
-        plan[pet.name] = cells
+        plan[pet.name] = SolveRaider(PetBuffOrder(ignored, scoped, pet),
+            warriorGreater)
         targetClass[pet.name] = "Warrior"
         petTargets[pet.name] = true
     end

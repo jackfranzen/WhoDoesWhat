@@ -421,6 +421,21 @@ local function ColoredName(name, classInfo)
         .. ShortTargetName(name) .. "|r"
 end
 
+-- Tooltip icon size, shared by the blessing icon and the pet marker so a pet
+-- line reads as one strip of icons rather than two mismatched ones.
+local TOOLTIP_ICON = 14
+
+-- A hunter pet carries its owner's class colour and (on the blessing rows) a
+-- name that is the pet's own, so nothing in the line says "pet" by itself.
+-- This marker does: it rides directly after the blessing icon, or in front of
+-- the name on the rows that have no icon of their own. Empty for everyone
+-- else, so call sites can concatenate it unconditionally.
+local function PetIconMarkup(isPet)
+    if not isPet then return "" end
+    local role = WhoDoesWhat.HunterPetRole
+    return role and WhoDoesWhat:RoleIconMarkup(role.icon, TOOLTIP_ICON) or ""
+end
+
 local function IsLocalPlayerName(name)
     local short = name and name:match("^([^%-]+)")
     return short ~= nil and short == UnitName("player")
@@ -727,7 +742,9 @@ local function FillCoreTooltip(row)
                     and ("weaker (" .. entry.rank .. "/" .. maxRank .. ")")
                     or "weaker buff"
             end
-            return ColoredName(entry.name, entry.classInfo), right
+            local pet = PetIconMarkup(entry.isPet)
+            if pet ~= "" then pet = pet .. " " end
+            return pet .. ColoredName(entry.name, entry.classInfo), right
         end)
     end
 end
@@ -755,8 +772,9 @@ local function FillPaladinTooltip(row)
     else
         AddEntryLines(missing, function(entry)
             local buff = WhoDoesWhat.PaladinBuffs[entry.key]
-            return "|T" .. buff.icon .. ":14:14:0:0|t "
-                .. ColoredName(entry.target, entry.classInfo),
+            return "|T" .. buff.icon .. ":" .. TOOLTIP_ICON .. ":"
+                .. TOOLTIP_ICON .. ":0:0|t" .. PetIconMarkup(entry.isPet)
+                .. " " .. ColoredName(entry.target, entry.classInfo),
                 entry.isGreater and buff.name_long
                     or (buff.name_long .. " (Lesser)")
         end)
@@ -1335,6 +1353,7 @@ function WhoDoesWhat:RefreshStatusBarsView()
                 target = cell.target,
                 key = cell.key,
                 classInfo = TargetClassInfo(cell.target, className),
+                isPet = cell.target:match("'s Pet$") ~= nil,
                 isGreater = greater ~= nil and className ~= nil
                     and greater[className] == cell.key,
             }
