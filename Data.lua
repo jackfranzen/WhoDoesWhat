@@ -173,7 +173,7 @@ for _, classInfo in ipairs(WhoDoesWhat.Classes) do
     if classInfo.name == "Paladin" then
         classInfo.roles[1].name = "Main Tank"
         table.insert(classInfo.roles, 2,
-            { name = "Trash Tank", icon = 135893, id = "paladin_prot_trash", wowRole = "tank" })
+            { name = "Threat Tank", icon = 136051, id = "paladin_prot_trash", wowRole = "tank" })
     elseif not features.isClassicEra then
         if classInfo.name == "Hunter" then
             table.insert(classInfo.roles,
