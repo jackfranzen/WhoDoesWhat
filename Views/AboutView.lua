@@ -13,6 +13,7 @@ local LINKS = {
     { label = "Video", value = "https://www.youtube.com/watch?v=g-M2CQ5YFB4" },
     { label = "CurseForge", value = "https://www.curseforge.com/wow/addons/whodoeswhat" },
     { label = "GitHub", value = "https://github.com/WallHackJack/WhoDoesWhat" },
+    { label = "Donate", value = "https://ko-fi.com/wallhackjack" },
 }
 
 -- Newest first. Add one entry when cutting each tagged release; the first
