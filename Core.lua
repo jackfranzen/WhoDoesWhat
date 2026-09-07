@@ -473,6 +473,9 @@ local defaults = {
             -- property of how much tooltip you want to read, not of any
             -- one buff, so it is not offered per-check.
             statusBarTooltipNames = 10,
+            -- Which animation a status row uses when it highlights
+            -- (see HIGHLIGHT_STYLES in StatusBarsView).
+            statusBarHighlightStyle = "spinFast",
             overviewWidth = 220,
             statusBarChecks = {},
         },

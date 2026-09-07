@@ -395,15 +395,214 @@ local function SetRowOffsetCached(row, offset)
     row:SetPoint("TOPLEFT", view, "TOPLEFT", INSET + PAD, -offset)
 end
 
-local function SetRowGlow(row, shown)
-    if not LCG then return end
-    if shown and not row.glowing then
-        LCG.PixelGlow_Start(row, nil, 16, nil, 3, nil, nil, nil, nil, nil, 4)
-        row.glowing = true
-    elseif not shown and row.glowing then
-        LCG.PixelGlow_Stop(row)
-        row.glowing = nil
+-- The styles LibCustomGlow does not cover: a plain outline drawn from four
+-- edge textures, and the pair of arrows a nameplate wears on its sides when
+-- it has your threat. Both hang off the row as one child frame, so switching
+-- styles is a Hide and pulsing is a fade of that one frame rather than of
+-- every piece in it.
+local OUTLINE_COLOR = { 0.95, 0.95, 0.32 }
+local ARROW_COLOR = { 1, 0.25, 0.2 }
+local OUTLINE_TH = 2
+local ARROW_W = 12
+local ARROW_GAP = 2
+local PULSE_SECONDS = 0.6
+local PULSE_MIN_ALPHA = 0.2
+
+-- The nameplate side arrows are atlas art, and not every client that runs
+-- this addon has that atlas. Where it is missing, the spellbook page arrows
+-- stand in: they have shipped since vanilla and read the same way at 12px.
+local ARROW_ATLASES = {
+    left = { "nameplates-target-arrow-left", "NamePlate-Target-Arrow-Left" },
+    right = { "nameplates-target-arrow-right", "NamePlate-Target-Arrow-Right" },
+}
+local ARROW_FALLBACK = {
+    left = "Interface\Buttons\UI-SpellbookIcon-NextPage-Up",
+    right = "Interface\Buttons\UI-SpellbookIcon-PrevPage-Up",
+}
+
+local function SetArrowArt(tex, side)
+    local info = C_Texture and C_Texture.GetAtlasInfo
+    if info then
+        for _, atlas in ipairs(ARROW_ATLASES[side]) do
+            if info(atlas) then
+                tex:SetAtlas(atlas)
+                tex:SetVertexColor(unpack(ARROW_COLOR))
+                return
+            end
+        end
     end
+    -- The page arrows point outward from their own frame, so each one takes
+    -- the file for the opposite side to end up pointing at the row.
+    tex:SetTexture(ARROW_FALLBACK[side])
+    tex:SetVertexColor(unpack(ARROW_COLOR))
+end
+
+local function EnsureOverlay(frame)
+    local overlay = frame.wdwHighlight
+    if overlay then return overlay end
+
+    overlay = CreateFrame("Frame", nil, frame)
+    overlay:SetAllPoints(frame)
+    overlay:SetFrameLevel(frame:GetFrameLevel() + 4)
+
+    overlay.edges = {}
+    for _, edge in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
+        local tex = overlay:CreateTexture(nil, "OVERLAY")
+        tex:SetColorTexture(unpack(OUTLINE_COLOR))
+        if edge == "TOP" or edge == "BOTTOM" then
+            tex:SetPoint(edge .. "LEFT")
+            tex:SetPoint(edge .. "RIGHT")
+            tex:SetHeight(OUTLINE_TH)
+        else
+            tex:SetPoint("TOP" .. edge)
+            tex:SetPoint("BOTTOM" .. edge)
+            tex:SetWidth(OUTLINE_TH)
+        end
+        overlay.edges[edge] = tex
+    end
+
+    overlay.arrows = {}
+    for _, side in ipairs({ "left", "right" }) do
+        local tex = overlay:CreateTexture(nil, "OVERLAY")
+        SetArrowArt(tex, side)
+        overlay.arrows[side] = tex
+    end
+    -- Outside the row on both sides: the row itself is already full of text,
+    -- and this is the empty margin the nameplate arrows would use.
+    overlay.arrows.left:SetPoint("RIGHT", overlay, "LEFT", -ARROW_GAP, 0)
+    overlay.arrows.right:SetPoint("LEFT", overlay, "RIGHT", ARROW_GAP, 0)
+
+    local pulse = overlay:CreateAnimationGroup()
+    pulse:SetLooping("BOUNCE")
+    local fade = pulse:CreateAnimation("Alpha")
+    fade:SetDuration(PULSE_SECONDS)
+    fade:SetFromAlpha(1)
+    fade:SetToAlpha(PULSE_MIN_ALPHA)
+    overlay.pulse = pulse
+
+    overlay:Hide()
+    frame.wdwHighlight = overlay
+    return overlay
+end
+
+local function StartOverlay(frame, arrows, pulsing)
+    local overlay = EnsureOverlay(frame)
+    for _, tex in pairs(overlay.edges) do tex:SetShown(not arrows) end
+    -- Arrows are square and track the row's height, which changes with the
+    -- window's scale, so size them at start rather than once at creation.
+    local height = math.max(8, math.floor(frame:GetHeight() + 0.5))
+    for _, tex in pairs(overlay.arrows) do
+        tex:SetShown(arrows)
+        tex:SetSize(ARROW_W, height)
+    end
+    overlay.pulse:Stop()
+    overlay:SetAlpha(1)
+    overlay:Show()
+    if pulsing then overlay.pulse:Play() end
+end
+
+local function StopOverlay(frame)
+    local overlay = frame.wdwHighlight
+    if not overlay then return end
+    overlay.pulse:Stop()
+    overlay:Hide()
+end
+
+-- The row highlight ("some of these are missing") as a set of named looks, so
+-- the effect is a setting rather than a hard-coded call. Each entry starts and
+-- stops exactly one LibCustomGlow effect; the frame remembers which style is
+-- running so changing the setting restarts it in place instead of leaving the
+-- old animation attached.
+local HIGHLIGHT_STYLES = {
+    spinFast = {
+        label = "Spinning (fast)",
+        Start = function(r)
+            LCG.PixelGlow_Start(r, nil, 16, nil, 3, nil, nil, nil, nil, nil, 4)
+        end,
+        Stop = function(r) LCG.PixelGlow_Stop(r) end,
+    },
+    spinSlow = {
+        label = "Spinning (slow)",
+        Start = function(r)
+            LCG.PixelGlow_Start(r, nil, 16, 0.1, 3, nil, nil, nil, nil, nil, 4)
+        end,
+        Stop = function(r) LCG.PixelGlow_Stop(r) end,
+    },
+    dashes = {
+        label = "Marching dashes",
+        Start = function(r)
+            LCG.PixelGlow_Start(r, nil, 6, 0.15, 10, 2, nil, nil, nil, nil, 4)
+        end,
+        Stop = function(r) LCG.PixelGlow_Stop(r) end,
+    },
+    sparkle = {
+        label = "Sparkles",
+        Start = function(r)
+            LCG.AutoCastGlow_Start(r, nil, 4, nil, 1, nil, nil, nil, 4)
+        end,
+        Stop = function(r) LCG.AutoCastGlow_Stop(r) end,
+    },
+    flash = {
+        label = "Pulsing glow",
+        Start = function(r) LCG.ButtonGlow_Start(r, nil, 0.35, 4) end,
+        Stop = function(r) LCG.ButtonGlow_Stop(r) end,
+    },
+    outline = {
+        label = "Solid outline",
+        Start = function(r) StartOverlay(r, false, false) end,
+        Stop = StopOverlay,
+    },
+    outlinePulse = {
+        label = "Pulsing outline",
+        Start = function(r) StartOverlay(r, false, true) end,
+        Stop = StopOverlay,
+    },
+    arrows = {
+        label = "Threat arrows",
+        Start = function(r) StartOverlay(r, true, false) end,
+        Stop = StopOverlay,
+    },
+    arrowsPulse = {
+        label = "Threat arrows (pulsing)",
+        Start = function(r) StartOverlay(r, true, true) end,
+        Stop = StopOverlay,
+    },
+    none = {
+        label = "None",
+        Start = function() end,
+        Stop = function() end,
+    },
+}
+local HIGHLIGHT_STYLE_ORDER = {
+    "spinFast", "spinSlow", "dashes", "sparkle", "flash",
+    "outline", "outlinePulse", "arrows", "arrowsPulse", "none",
+}
+
+function WhoDoesWhat:GetStatusBarHighlightStyles()
+    return HIGHLIGHT_STYLES, HIGHLIGHT_STYLE_ORDER
+end
+
+-- `styleKey` is for the settings preview, which shows one specific style
+-- rather than the saved one.
+function WhoDoesWhat:ApplyStatusBarHighlight(frame, shown, styleKey)
+    if not LCG then return end
+    if not styleKey then
+        styleKey = WhoDoesWhat.db.profile.settings.statusBarHighlightStyle
+        if not HIGHLIGHT_STYLES[styleKey] then styleKey = "spinFast" end
+    end
+    local running = frame.glowStyle
+    if running and (not shown or running ~= styleKey) then
+        HIGHLIGHT_STYLES[running].Stop(frame)
+        frame.glowStyle = nil
+    end
+    if shown and not frame.glowStyle then
+        HIGHLIGHT_STYLES[styleKey].Start(frame)
+        frame.glowStyle = styleKey
+    end
+end
+
+local function SetRowGlow(row, shown)
+    WhoDoesWhat:ApplyStatusBarHighlight(row, shown)
 end
 
 -- ---------------------------------------------------------------------------

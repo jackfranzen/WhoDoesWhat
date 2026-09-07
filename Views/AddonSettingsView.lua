@@ -1404,6 +1404,63 @@ local function EnsureSettingsFrame()
     f.overviewTooltipNamesDD = tooltipNamesDD
     yL = yL + 32
 
+    -- The highlight style, with a live sample of it beside the dropdown --
+    -- these read as animation names on their own, and the box is the only
+    -- honest way to say what each one looks like.
+    local highlightLabel = statusPage:CreateFontString(nil, "OVERLAY",
+        "GameFontHighlight")
+    highlightLabel:SetPoint("TOPLEFT", CONTENT_X + 4, -(yL + 4))
+    highlightLabel:SetText("Highlight style:")
+    local highlightDD = CreateFrame("Frame",
+        "WhoDoesWhatStatusBarsHighlightDD", statusPage, "UIDropDownMenuTemplate")
+    highlightDD:SetPoint("LEFT", highlightLabel, "RIGHT", -6, -2)
+    UIDropDownMenu_SetWidth(highlightDD, 110)
+    WhoDoesWhat:StyleDropdown(highlightDD, true)
+
+    local highlightPreview = CreateFrame("Frame", nil, statusPage)
+    highlightPreview:SetSize(56, 18)
+    -- Enough clearance for the styles that draw outside the box (the arrows
+    -- flank it the way they flank a status row).
+    highlightPreview:SetPoint("LEFT", highlightDD, "RIGHT", 28, 2)
+    local previewBg = highlightPreview:CreateTexture(nil, "BACKGROUND")
+    previewBg:SetAllPoints()
+    previewBg:SetColorTexture(0.16, 0.16, 0.18, 1)
+    local previewFill = highlightPreview:CreateTexture(nil, "ARTWORK")
+    previewFill:SetPoint("TOPLEFT", 1, -1)
+    previewFill:SetPoint("BOTTOMLEFT", 1, 1)
+    previewFill:SetWidth(34)
+    previewFill:SetColorTexture(0.96, 0.55, 0.73, 0.8)
+    f.overviewHighlightPreview = highlightPreview
+
+    local function ApplyHighlightPreview(styleKey)
+        WhoDoesWhat:ApplyStatusBarHighlight(highlightPreview, true, styleKey)
+    end
+    f.ApplyHighlightPreview = ApplyHighlightPreview
+
+    UIDropDownMenu_Initialize(highlightDD, function(_, level)
+        local styles, order = WhoDoesWhat:GetStatusBarHighlightStyles()
+        local saved = WhoDoesWhat.db.profile.settings.statusBarHighlightStyle
+        if not styles[saved] then saved = "spinFast" end
+        for _, key in ipairs(order) do
+            local styleKey = key
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = styles[styleKey].label
+            info.checked = saved == styleKey
+            info.func = function()
+                WhoDoesWhat.db.profile.settings.statusBarHighlightStyle = styleKey
+                UIDropDownMenu_SetText(highlightDD, styles[styleKey].label)
+                ApplyHighlightPreview(styleKey)
+                WhoDoesWhat:RefreshStatusBarsView()
+            end
+            UIDropDownMenu_AddButton(info, level)
+        end
+    end)
+    AddDropdownTooltip(highlightDD, highlightLabel, "Highlight style",
+        "The animation a status bar uses when it wants your attention -- the"
+            .. " box to the right shows it running.")
+    f.overviewHighlightDD = highlightDD
+    yL = yL + 32
+
     -- ---- Buff Tracking ----
     local statusBuffPage = pages[3]
     yL = y0
@@ -1876,6 +1933,12 @@ function WhoDoesWhat:OpenAddonSettingsView(section)
             or STATUS_TOOLTIP_ANCHOR_LABELS.LEFT)
     UIDropDownMenu_SetText(f.overviewTooltipNamesDD,
         tostring(settings.statusBarTooltipNames or DEFAULT_TOOLTIP_NAMES))
+    local highlightStyles = WhoDoesWhat:GetStatusBarHighlightStyles()
+    local highlightStyle = settings.statusBarHighlightStyle
+    if not highlightStyles[highlightStyle] then highlightStyle = "spinFast" end
+    UIDropDownMenu_SetText(f.overviewHighlightDD,
+        highlightStyles[highlightStyle].label)
+    f.ApplyHighlightPreview(highlightStyle)
     RefreshStatusBuffRows(f)
     f.devModeCheck:SetChecked(settings.developerMode)
     f.showLogsCheck:SetChecked(settings.showLogsButton)
