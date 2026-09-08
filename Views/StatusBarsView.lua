@@ -577,6 +577,9 @@ local PULSE_MIN_ALPHA = 0.2
 -- fade, so the row stays equally readable at both ends of the swing.
 local BOB_SECONDS = 0.7
 local BOB_PX = 5
+-- Extra reach on each side of the two button-glow styles, so the halo clears
+-- the row by a pixel rather than sitting right on its edge.
+local GLOW_PAD = 1
 
 -- One colour for every style, so the setting is "what colour is the highlight"
 -- rather than one answer per effect. The default is LibCustomGlow's own yellow,
@@ -785,7 +788,21 @@ end
 local function StartButtonGlow(frame, animated)
     LCG.ButtonGlow_Start(frame, HighlightColor(), 0.35, 0)
     local glow = frame._ButtonGlow
-    if glow then glow.ants:SetShown(animated) end
+    if not glow then return end
+    glow.ants:SetShown(animated)
+    -- The library sizes this at a flat 1.4x of the frame it is handed and takes
+    -- no argument for more. A status row is short, so 1.4x of it is a thinner
+    -- halo than the same effect wears on a square action button; the extra
+    -- reach is re-anchored on afterwards. The art inside is sized from the
+    -- frame by the library's own animation, which re-reads it as it finishes.
+    local w, h = frame:GetSize()
+    glow:ClearAllPoints()
+    glow:SetPoint("TOPLEFT", frame, "TOPLEFT",
+        -(w * 0.2 + GLOW_PAD), h * 0.2 + GLOW_PAD)
+    glow:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT",
+        w * 0.2 + GLOW_PAD, -(h * 0.2 + GLOW_PAD))
+    glow.ants:SetSize((w * 1.4 + GLOW_PAD * 2) * 0.85,
+        (h * 1.4 + GLOW_PAD * 2) * 0.85)
 end
 
 -- The row highlight ("some of these are missing") as a set of named looks, so
