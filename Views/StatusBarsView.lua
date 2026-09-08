@@ -1642,11 +1642,18 @@ local function CreateStateRow(key)
     row.highlight = highlight
 
     -- Same reason as the bar rows: the badge goes on a child frame so the
-    -- styles that draw behind the row stay behind it.
+    -- styles that draw behind the row stay behind it, on the same grey square,
+    -- so the icon column is opaque the whole way down the window. The
+    -- PallyPower badge brings a backing of its own in this colour; the Action
+    -- Items one is a bare icon and was letting the glow through around it.
     local iconHost = CreateFrame("Frame", nil, row)
     iconHost:SetSize(ICON_SIZE, ICON_SIZE)
     iconHost:SetPoint("TOPLEFT", 0, 0)
     row.iconHost = iconHost
+
+    local iconBg = iconHost:CreateTexture(nil, "BACKGROUND")
+    iconBg:SetAllPoints()
+    iconBg:SetColorTexture(unpack(ICON_BG_COLOR))
 
     local badge = kind.CreateIcon(iconHost)
     badge:SetPoint("TOPLEFT", 0, 0)
