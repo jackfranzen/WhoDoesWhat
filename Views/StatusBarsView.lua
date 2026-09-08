@@ -261,20 +261,23 @@ local function AnnounceLine(prefix, names)
     return prefix .. body
 end
 
--- How many are still short, as a fraction and a percentage of the whole check.
--- The raid wants the size of the problem; a roll call of two dozen names in
--- raid chat is a wall nobody reads, so the names only appear while there are
--- few enough to be a list rather than a wall.
+-- How far along the check is, as a fraction and a percentage of the whole. The
+-- raid wants the size of the job; a roll call of two dozen names in raid chat
+-- is a wall nobody reads, so the names only appear while there are few enough
+-- to be a list rather than a wall.
+--
+-- Counted forwards, not backwards: "18/25 Applied" is the same fact as "7/25
+-- missing" and reads as progress rather than an accusation.
 local MAX_NAMED_MISSING = 5
 
-local function MissingSummary(label, missing, total)
-    local percent = total > 0 and math.floor(missing * 100 / total + 0.5) or 0
-    return string.format("%s -- %d/%d missing (%d%%)", label, missing, total,
+local function CoverageSummary(label, applied, total)
+    local percent = total > 0 and math.floor(applied * 100 / total + 0.5) or 0
+    return string.format("%s -- %d/%d Applied (%d%%)", label, applied, total,
         percent)
 end
 
--- "Hewmongus (Might, Wisdom) -- 7/25 missing (28%)". Which blessing each raider
--- is missing is deliberately left out -- the paladin knows their own
+-- "Hewmongus (Might, Wisdom) -- 18/25 Applied (72%)". Which blessing each
+-- raider is missing is deliberately left out -- the paladin knows their own
 -- assignment, and naming it per raider turns one line into five.
 local function AnnouncePaladinLine(paladin, coverage)
     local blessings = {}
@@ -294,10 +297,9 @@ local function AnnouncePaladinLine(paladin, coverage)
     if #blessings > 0 then
         label = label .. " (" .. table.concat(blessings, ", ") .. ")"
     end
-    local summary = MissingSummary(label, coverage.total - coverage.correct,
-        coverage.total)
+    local summary = CoverageSummary(label, coverage.correct, coverage.total)
     if #names == 0 or #names > MAX_NAMED_MISSING then return summary end
-    return AnnounceLine(summary .. ": ", names)
+    return AnnounceLine(summary .. " -- Missing: ", names)
 end
 
 -- Recomputed at click time rather than read off the painted row: a combined
@@ -329,14 +331,17 @@ local function AnnounceLines(row)
         for _, entry in ipairs(row.flagged or {}) do
             names[#names + 1] = entry.name
         end
-        -- Nothing missing, nothing to say: a finished check announced itself as
-        -- "0 missing" only because the summary always has a number to print,
-        -- where the old name list simply came out empty and sent nothing.
+        -- Nothing missing, nothing to say. The summary always has a number to
+        -- print, so without this a finished check would announce itself as
+        -- "25/25 Applied" where the old bare name list came out empty and sent
+        -- nothing at all.
         if #names == 0 then return lines end
-        local line = MissingSummary(definition and definition.name
-            or row.buffKey, #names, row.total or 0)
+        local line = CoverageSummary(definition and definition.name
+            or row.buffKey, row.correct or 0, row.total or 0)
+        -- Named as what they are: after a forwards-counting fraction, a bare
+        -- list behind a colon could as easily be read as the ones who have it.
         if #names <= MAX_NAMED_MISSING then
-            line = AnnounceLine(line .. ": ", names)
+            line = AnnounceLine(line .. " -- Missing: ", names)
         end
         -- Who can fix it, on the same line: a count nobody owns is a
         -- complaint, and the raid should not have to work out whose job it is.
