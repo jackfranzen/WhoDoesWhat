@@ -24,6 +24,9 @@ local ROW_H = 19
 -- that is still above the window's backdrop.
 local ROW_LEVEL = 3
 local ICON_SIZE = 18
+-- The square a row's icon sits on. Matches K.CreatePallyPowerBadge's own
+-- backing so every row's icon column is the same grey.
+local ICON_BG_COLOR = { 0.28, 0.28, 0.3, 1 }
 local BAR_H = 18
 local EMPTY_ICON_SIZE = math.floor(BAR_H * 0.8 + 0.5)
 local DEFAULT_W = 220
@@ -1531,10 +1534,12 @@ local function CreateRow(index)
 
     -- The bar half of the row has an opaque background and the icon half did
     -- not, so anything drawn behind the row showed through around the icon and
-    -- stopped dead at the bar. Same colour, so the row reads as one strip.
+    -- stopped dead at the bar. Chrome, not highlight: it stays this grey
+    -- whatever colour the highlight is set to, and it is the grey the
+    -- PallyPower badge already sits on, so the icon column reads as one column.
     local iconBg = iconHost:CreateTexture(nil, "BACKGROUND")
     iconBg:SetAllPoints()
-    iconBg:SetColorTexture(0.025, 0.025, 0.035, 1)
+    iconBg:SetColorTexture(unpack(ICON_BG_COLOR))
 
     local icon = iconHost:CreateTexture(nil, "ARTWORK")
     icon:SetAllPoints()
