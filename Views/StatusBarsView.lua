@@ -1950,7 +1950,7 @@ function WhoDoesWhat:RefreshStatusBarsView()
     local paladinCorrect, paladinTotal, coverageByPaladin =
         self.Assign.ComputePaladinBuffCoverage(buffPlan,
             paladinOptions.hunterPets)
-    local _, _, coreCoverage = self.Assign.ComputeCoreRaidBuffCoverage()
+    local _, coreTotal, coreCoverage = self.Assign.ComputeCoreRaidBuffCoverage()
     local colorPreviewMode = self.statusBarColorPreviewKey ~= nil
     local displayed = {}
     local coreCoverageByKey = {}
@@ -2313,7 +2313,10 @@ function WhoDoesWhat:RefreshStatusBarsView()
     view.emptyCheck:ClearAllPoints()
     view.emptyCheck:SetPoint("TOP", view, "TOP", 0,
         -(CONTENT_TOP + (ROW_H - EMPTY_ICON_SIZE) / 2))
-    view.emptyCheck:SetTexture(total > 0 and READY_ICON or NOT_READY_ICON)
+    -- Nothing to show because everything is covered reads as ready; nothing
+    -- to show because there is nothing trackable does not.
+    view.emptyCheck:SetTexture(paladinTotal + coreTotal > 0
+        and READY_ICON or NOT_READY_ICON)
     view.emptyCheck:SetShown(showEmptyCheck)
 end
 
