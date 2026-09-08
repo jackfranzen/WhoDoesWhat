@@ -539,7 +539,10 @@ local defaults = {
             -- {r,g,b} here; the Status Bars page's Defaults button puts this
             -- amber back.
             statusBarHighlightColor = { r = 0.95, g = 0.71, b = 0 },
-            overviewWidth = 140,
+            -- The narrowest the window can be dragged (RESIZE_MIN_W in
+            -- StatusBarsView). Defaults and the page's Defaults button hand it
+            -- back at its smallest, to be widened from there.
+            overviewWidth = 68,
             statusBarChecks = {},
         },
     },

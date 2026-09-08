@@ -29,11 +29,11 @@ local ICON_SIZE = 18
 local ICON_BG_COLOR = { 0.28, 0.28, 0.3, 1 }
 local BAR_H = 18
 local EMPTY_ICON_SIZE = math.floor(BAR_H * 0.8 + 0.5)
--- Only reached if the setting is missing; the profile default in Core.lua is
--- the real answer and matches this.
-local DEFAULT_W = 140
 local MIN_W = 90
 local RESIZE_MIN_W = 68
+-- Only reached if the setting is missing; the profile default in Core.lua is
+-- the real answer and is this same narrowest-allowed width.
+local DEFAULT_W = RESIZE_MIN_W
 local HIDE_NAMES_W = 105
 local ULTRA_COMPACT_W = 115
 local HANDLE_W = 4
