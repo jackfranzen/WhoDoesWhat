@@ -5,6 +5,65 @@ local WhoDoesWhat = LibStub("AceAddon-3.0"):GetAddon("WhoDoesWhat")
 
 WhoDoesWhat.TITLEBAR_H = 22
 
+-- Every bar and window ends its tooltip with the same gold "modifier-click:
+-- what it does" list. Those hints are reference material rather than the
+-- answer the tooltip was opened for, so they are drawn a point below the body
+-- font and let the content above them lead. Blizzard's own small tooltip font
+-- is two sizes down and reads as fine print, so the hint font is derived from
+-- the body's instead, which also keeps it following the player's tooltip font
+-- scale.
+local HINT_FONT = CreateFont("WhoDoesWhatTooltipHintFont")
+do
+    local path, size, flags = GameTooltipText:GetFont()
+    HINT_FONT:SetFont(path, (size or 12) - 1, flags)
+end
+
+-- A tooltip pools its font strings across every tooltip it draws, so a shrunk
+-- line has to be put back before the next content inherits it. Keyed by
+-- tooltip: the value is the last line we shrank, and nil means we have not
+-- hooked that tooltip's clear yet.
+local hintLines = {}
+
+local function RestoreHintFonts(tooltip)
+    local name = tooltip:GetName()
+    -- Line 1 is the header, in its own larger font, and never a hint.
+    for i = 2, hintLines[tooltip] or 0 do
+        local left = _G[name .. "TextLeft" .. i]
+        local right = _G[name .. "TextRight" .. i]
+        if left then left:SetFontObject(GameTooltipText) end
+        if right then right:SetFontObject(GameTooltipText) end
+    end
+    hintLines[tooltip] = 0
+end
+
+-- One shortcut hint: "Alt-Drag:" on the left, what it does on the right.
+-- SetFontObject brings the font's own colour with it, so the line's colours
+-- are re-applied after the shrink rather than before it. An unnamed tooltip
+-- has no reachable font strings; it just keeps the body size.
+function WhoDoesWhat:AddTooltipHint(tooltip, shortcut, action, r, g, b)
+    tooltip = tooltip or GameTooltip
+    r, g, b = r or 1, g or 1, b or 1
+    tooltip:AddDoubleLine(shortcut, action, 1, 0.82, 0, r, g, b)
+    local name = tooltip:GetName()
+    if not name then return end
+    if hintLines[tooltip] == nil then
+        hintLines[tooltip] = 0
+        tooltip:HookScript("OnTooltipCleared", RestoreHintFonts)
+    end
+    local i = tooltip:NumLines()
+    local left = _G[name .. "TextLeft" .. i]
+    local right = _G[name .. "TextRight" .. i]
+    if left then
+        left:SetFontObject(HINT_FONT)
+        left:SetTextColor(1, 0.82, 0)
+    end
+    if right then
+        right:SetFontObject(HINT_FONT)
+        right:SetTextColor(r, g, b)
+    end
+    if i > hintLines[tooltip] then hintLines[tooltip] = i end
+end
+
 -- Apply the addon's compact treatment to Blizzard's legacy dropdown chrome.
 -- Its three housing textures are 64px tall (with transparent padding) around
 -- a 24px arrow. Trim and position that housing without scaling any click

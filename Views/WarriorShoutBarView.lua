@@ -534,14 +534,13 @@ local function ShowShoutTooltip(btn)
     -- The bar has no title strip to hang these off any more, so every button
     -- carries them.
     GameTooltip:AddLine(" ")
-    GameTooltip:AddDoubleLine("Left-Click:", "Shout", 1, 0.82, 0, 1, 1, 1)
+    WhoDoesWhat:AddTooltipHint(GameTooltip, "Left-Click:", "Shout")
     if btn.isSoloIcon then
-        GameTooltip:AddDoubleLine("Right-Click:", "Swap shout",
-            1, 0.82, 0, 1, 1, 1)
+        WhoDoesWhat:AddTooltipHint(GameTooltip, "Right-Click:", "Swap shout")
     end
-    GameTooltip:AddDoubleLine("Alt-Drag:", "Move", 1, 0.82, 0, 1, 1, 1)
-    GameTooltip:AddDoubleLine("Shift-Right-Click:", "Shout Bar Settings",
-        1, 0.82, 0, 1, 1, 1)
+    WhoDoesWhat:AddTooltipHint(GameTooltip, "Alt-Drag:", "Move")
+    WhoDoesWhat:AddTooltipHint(GameTooltip, "Shift-Right-Click:",
+        "Shout Bar Settings")
     GameTooltip:Show()
 end
 

@@ -507,6 +507,12 @@ local function StatusBarsClick(self, button)
     end
 end
 
+-- Shared with the Paladin Bar and the Shout Bar (WdwFrame.lua): the gold
+-- shortcut hints are drawn a point below the body font everywhere.
+local function AddHintLine(shortcut, action)
+    WhoDoesWhat:AddTooltipHint(GameTooltip, shortcut, action)
+end
+
 -- Same double-line shortcut layout the minimap button uses, grouped by
 -- modifier: Alt does things to the window, Shift does things with what is in
 -- it. The row shortcuts used to be listed here too, which meant reading four
@@ -514,10 +520,8 @@ end
 -- live on the rows' own tooltips now, where they apply.
 local function AddShortcutTooltipLines()
     GameTooltip:AddLine(" ")
-    GameTooltip:AddDoubleLine("Shift-Left-Click:", "Buffing Grid",
-        1, 0.82, 0, 1, 1, 1)
-    GameTooltip:AddDoubleLine("Shift-Right-Click:", "Settings",
-        1, 0.82, 0, 1, 1, 1)
+    AddHintLine("Shift-Left-Click:", "Buffing Grid")
+    AddHintLine("Shift-Right-Click:", "Settings")
 end
 
 local function RoleIcon(name)
@@ -962,6 +966,10 @@ end
 -- line reads as one strip of icons rather than two mismatched ones.
 local TOOLTIP_ICON = 14
 
+-- The header line is drawn in the larger header font, so its icon is sized to
+-- that rather than to the name lines below it.
+local TOOLTIP_HEADER_ICON = 16
+
 -- A hunter pet carries its owner's class colour and (on the blessing rows) a
 -- name that is the pet's own, so nothing in the line says "pet" by itself.
 -- This marker does: it rides directly after the blessing icon, or in front of
@@ -1117,16 +1125,24 @@ end
 
 -- Where a best-rank requirement is in force, one number can't tell the story:
 -- somebody carrying a weaker Fortitude is in a different place from somebody
--- carrying none. Three lines split it -- what's optimal, what's buffed at all,
--- and the bare count of who has nothing.
-local function AddSplitProgressLines(correct, anyCorrect, total)
-    local function Percent(count)
-        return math.floor(count / total * 100 + 0.5)
-    end
+-- carrying none. The headline keeps the fraction; the lines under it are plain
+-- head counts of who is still owed a cast, since those are shortfalls rather
+-- than progress and a second denominator only muddies the first. Three ways to
+-- fall short, each its own line: too weak a cast, a cast from somebody the
+-- raid loses on the pull, and nothing at all.
+local function AddSplitProgressLines(correct, anyCorrect, outside, total)
+    local percent = math.floor(correct / total * 100 + 0.5)
     GameTooltip:AddLine("|cff4dff4d" .. correct .. "/" .. total
-        .. " with best buff (" .. Percent(correct) .. "%)|r", 1, 1, 1)
-    GameTooltip:AddLine("|cffffd133" .. anyCorrect .. "/" .. total
-        .. " with any buff (" .. Percent(anyCorrect) .. "%)|r", 1, 1, 1)
+        .. " with best buff (" .. percent .. "%)|r", 1, 1, 1)
+    local weaker = anyCorrect - correct - outside
+    if weaker > 0 then
+        GameTooltip:AddLine("|cffffd133" .. weaker
+            .. " with weaker buff|r", 1, 1, 1)
+    end
+    if outside > 0 then
+        GameTooltip:AddLine("|cff909090" .. outside
+            .. " with unknown buff|r", 1, 1, 1)
+    end
     if anyCorrect < total then
         GameTooltip:AddLine("|cffff4d4d" .. (total - anyCorrect)
             .. " missing buff|r", 1, 1, 1)
@@ -1217,7 +1233,12 @@ end
 local function FillCoreTooltip(row)
     local definition = row.buffKey and WhoDoesWhat.StatusBarChecks[row.buffKey]
     if not definition then return end
-    GameTooltip:SetText(definition.name, 1, 1, 1)
+    -- The bar's own icon leads its tooltip, so the tooltip and the row under
+    -- the cursor are obviously the same thing at a glance.
+    local icon = definition.icon and ("|T" .. definition.icon .. ":"
+        .. TOOLTIP_HEADER_ICON .. ":" .. TOOLTIP_HEADER_ICON
+        .. ":0:0|t ") or ""
+    GameTooltip:SetText(icon .. definition.name, 1, 1, 1)
     -- With nobody present to cast it there is no progress to report and no
     -- point naming everyone who lacks it: the missing class is the whole
     -- story, and the check sits out of the raid's total coverage entirely.
@@ -1238,7 +1259,11 @@ local function FillCoreTooltip(row)
     end
     local split = row.anyCorrect ~= nil and row.anyCorrect > row.correct
     if split then
-        AddSplitProgressLines(row.correct, row.anyCorrect, row.total)
+        AddSplitProgressLines(row.correct, row.anyCorrect,
+            row.outside or 0, row.total)
+        -- The counts are their own summary; a gap keeps them from reading as
+        -- the first entries of the name list under them.
+        GameTooltip:AddLine(" ")
     else
         -- Colored to agree with the list under it rather than with the bar:
         -- for every check but mid-fight Sated these are the same thing, and
@@ -1391,19 +1416,15 @@ local function ShowRowTooltip(frame)
     -- Alt moves or configures, Shift chases the buff.
     if frame.optionsKey then
         GameTooltip:AddLine(" ")
-        GameTooltip:AddDoubleLine("Alt-Drag:", "Move",
-            1, 0.82, 0, 1, 1, 1)
-        GameTooltip:AddDoubleLine("Alt-Right-Click:", "Settings",
-            1, 0.82, 0, 1, 1, 1)
+        AddHintLine("Alt-Drag:", "Move")
+        AddHintLine("Alt-Right-Click:", "Settings")
         if frame.canAnnounce then
             GameTooltip:AddLine(" ")
             local whisper = WhisperLabel(frame)
             if whisper then
-                GameTooltip:AddDoubleLine("Shift-Left-Click:", whisper,
-                    1, 0.82, 0, 1, 1, 1)
+                AddHintLine("Shift-Left-Click:", whisper)
             end
-            GameTooltip:AddDoubleLine("Shift-Right-Click:", "Announce",
-                1, 0.82, 0, 1, 1, 1)
+            AddHintLine("Shift-Right-Click:", "Announce")
         end
     end
     GameTooltip:Show()
@@ -1829,10 +1850,8 @@ local function EnsureView()
         GameTooltip:SetText("|T" .. WhoDoesWhat.ADDON_ICON .. ":16:16:0:0|t "
             .. "WhoDoesWhat Status Bars", 1, 1, 1)
         GameTooltip:AddLine(" ")
-        GameTooltip:AddDoubleLine("Alt-Drag:", "Move",
-            1, 0.82, 0, 1, 1, 1)
-        GameTooltip:AddDoubleLine("Alt-Drag-Edge:", "Resize",
-            1, 0.82, 0, 1, 1, 1)
+        AddHintLine("Alt-Drag:", "Move")
+        AddHintLine("Alt-Drag-Edge:", "Resize")
         AddShortcutTooltipLines()
         GameTooltip:Show()
     end)
@@ -1860,8 +1879,7 @@ local function EnsureView()
         GameTooltip:ClearLines()
         GameTooltip:SetText("Resize WDW Status Bars", 1, 1, 1)
         GameTooltip:AddLine("(" .. width .. "px)", 1, 0.82, 0)
-        GameTooltip:AddDoubleLine("Alt-Drag:", "Resize",
-            1, 0.82, 0, 1, 1, 1)
+        AddHintLine("Alt-Drag:", "Resize")
         GameTooltip:Show()
     end
     local function FinishResize(self)

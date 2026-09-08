@@ -262,14 +262,10 @@ end
 
 local function MinimapTooltip(tooltip)
     tooltip:AddLine("WhoDoesWhat", 1, 1, 1)
-    tooltip:AddDoubleLine("Left-Click:", "Assignments",
-        1, 0.82, 0, 1, 1, 1)
-    tooltip:AddDoubleLine("Right-Click:", "Buffing Grid",
-        1, 0.82, 0, 1, 1, 1)
-    tooltip:AddDoubleLine("Shift-Left-Click:", "Members",
-        1, 0.82, 0, 1, 1, 1)
-    tooltip:AddDoubleLine("Shift-Right-Click:", "Settings",
-        1, 0.82, 0, 1, 1, 1)
+    WhoDoesWhat:AddTooltipHint(tooltip, "Left-Click:", "Assignments")
+    WhoDoesWhat:AddTooltipHint(tooltip, "Right-Click:", "Buffing Grid")
+    WhoDoesWhat:AddTooltipHint(tooltip, "Shift-Left-Click:", "Members")
+    WhoDoesWhat:AddTooltipHint(tooltip, "Shift-Right-Click:", "Settings")
 end
 
 -- LibDBIcon, and nothing of our own on top of it. That is the whole point.

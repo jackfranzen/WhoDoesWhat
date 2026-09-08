@@ -1935,6 +1935,10 @@ local function ComputeCoreRaidBuffCoverage()
                 -- `correct` unless a best-rank requirement is in force, which
                 -- is exactly when the tooltip splits the two apart.
                 anyCorrect = 0,
+                -- Of those, how many were buffed by somebody the raid loses on
+                -- the pull. They are a category of their own in the tooltip:
+                -- not weak, just borrowed.
+                outside = 0,
                 -- Targets worth acting on: raiders missing a buff, or carrying
                 -- a tracked debuff on a negative check. Drives the tooltip's
                 -- "who still needs this" list.
@@ -1989,7 +1993,10 @@ local function ComputeCoreRaidBuffCoverage()
                     -- the raider will actually have thirty seconds from now.
                     local outside = hasBuff and flagOutside
                         and WhoDoesWhat:IsBuffFromOutsideRaid(m.name, key)
-                    if outside then covered = false end
+                    if outside then
+                        covered = false
+                        row.outside = row.outside + 1
+                    end
                     if hasBuff then row.anyCorrect = row.anyCorrect + 1 end
                     if covered then
                         row.correct = row.correct + 1

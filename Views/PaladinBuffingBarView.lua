@@ -1894,8 +1894,7 @@ local function EnsureBar()
                 0.6, 0.6, 0.6, true)
         end
         GameTooltip:AddLine(" ")
-        GameTooltip:AddDoubleLine("Alt-Drag:", "Move",
-            1, 0.82, 0, 1, 1, 1)
+        WhoDoesWhat:AddTooltipHint(GameTooltip, "Alt-Drag:", "Move")
         -- The switch, and then a gap: it belongs with the move as something
         -- that acts on the bar itself, not with the two that open a window.
         -- It names the RESULT of the click rather than the mechanism, and
@@ -1906,14 +1905,14 @@ local function EnsureBar()
             if standingDown then
                 label, r, g, b = "Enable WhoDoesWhat", 0.3, 1, 0.3
             end
-            GameTooltip:AddDoubleLine("Alt-Right-Click:", label,
-                1, 0.82, 0, r, g, b)
+            WhoDoesWhat:AddTooltipHint(GameTooltip, "Alt-Right-Click:", label,
+                r, g, b)
             GameTooltip:AddLine(" ")
         end
-        GameTooltip:AddDoubleLine("Shift-Left-Click:", "Buffing Grid",
-            1, 0.82, 0, 1, 1, 1)
-        GameTooltip:AddDoubleLine("Shift-Right-Click:", "Paladin Bar Settings",
-            1, 0.82, 0, 1, 1, 1)
+        WhoDoesWhat:AddTooltipHint(GameTooltip, "Shift-Left-Click:",
+            "Buffing Grid")
+        WhoDoesWhat:AddTooltipHint(GameTooltip, "Shift-Right-Click:",
+            "Paladin Bar Settings")
     end
     title:SetScript("OnEnter", ShowBarTooltip)
     title:SetScript("OnLeave", function() GameTooltip:Hide() end)
