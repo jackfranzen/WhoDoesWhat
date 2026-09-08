@@ -1,0 +1,117 @@
+local WhoDoesWhat = LibStub("AceAddon-3.0"):GetAddon("WhoDoesWhat")
+
+-- The release notes the About window shows, and nothing else: one line per
+-- change, because that panel is glanced at in a window rather than read.
+-- CHANGELOG.md, in the addon folder, carries the same releases in markdown for
+-- anyone reading them outside the game -- update both when cutting a tag.
+--
+-- Newest first. The first entry is presented as the latest release.
+WhoDoesWhat.Releases = {
+    {
+        version = "1.2.0",
+        date = "2026-09-08",
+        notes = {
+            "Added the Warrior Shout Bar: one clickable icon per shout, counts relevant party members. Added \"melee\" hunter role.",
+            "The Paladin Bar can stand up as a vertical column, with per-class expiry countdowns, an aura picker that casts, and an alt-right-click switch that hands the raid over to PallyPower.",
+            "WhoDoesWhat roles can be drawn on Blizzard's raid frames, in five styles from a round replacement icon to a faded band down the health bar.",
+            "Shift-left-click a status bar to whisper whoever can fix it -- the paladins, the priests, or everyone still needing to eat.",
+            "Status bar announces and whispers now count forwards, name the stragglers only while there are few of them, and are signed like every other message the addon sends.",
+            "Status bar rows glow in a highlight style of your choosing, in a color of your choosing, with a live preview in the settings.",
+            "Divine Spirit is tracked on TBC, including who can cast it at all and who would have to respec first.",
+            "Buffs cast by somebody outside the raid are counted as missing, and named separately in the tooltip.",
+            "Hunter pets are matched for blessings across every paladin rather than the leftovers, and a Steam Tonk is no longer mistaken for one.",
+            "Paladin Trash Tank is now Threat Tank, and the Arms and Enhancement icons were refreshed.",
+        },
+    },
+    {
+        version = "1.1.0",
+        date = "2026-08-20",
+        notes = {
+            "Shift-right-click a status bar to announce who is still missing that buff in raid chat; editing moved to alt-right-click.",
+            "Action Items folded into the Members window: roles, talents, and what needs fixing in one place.",
+            "Ignore a blessing for part of the raid -- \"Sanctuary except for Tanks\" is now one rule.",
+            "A paladin running without PallyPower announces themselves to it, so they can be given assignments.",
+            "Raid assistants can set group roles by hand again.",
+            "Large-raid performance pass; the biggest gains are in a 40-man with several paladins.",
+        },
+    },
+    {
+        version = "1.0.11",
+        date = "2026-08-11",
+        notes = {
+            "Reworked Action Items and gave it a WDW Status row, with a Talents column in place of the old fix buttons.",
+            "Added \"Hide when nothing is yours to fix\" to the Action Items status row.",
+            "Roles that disagree with the last talent scan are now flagged.",
+            "Custom roles are shared with the raid, and default role overrides now apply to the raid instead of per profile.",
+            "Gave the roles grid its own row of column headings.",
+            "Paladin auras are picked from a hover grid instead of cycling.",
+            "Sated glows when a lust leaves raiders behind.",
+            "Hunter pets show their own name, with the owner behind it.",
+            "The promote prompt now reaches every assistant, including after a late promotion.",
+            "Rebuilt the buffing rules and consolidated blessing fallbacks; the best-available rule relaxes in combat.",
+            "PallyPower fixes skip roleless raiders, and the \"upsetting the raid\" warning only appears without rights.",
+            "Status bars are on by default, with clearer shortcuts.",
+            "Fixed accented names rendering half a byte as their initials.",
+            "Fixed roster repaints closing an open role dropdown, and a stale cache replay claiming a respec.",
+        },
+    },
+    {
+        version = "1.0.10",
+        date = "2026-08-06",
+        notes = {
+            "WhoDoesWhat no longer changes anyone's Blizzard group role on its own.",
+            "Added the Action Items window: group roles that don't match, and tanks not promoted to Main Tank.",
+            "Added an Actions button to the main window that glows when something needs fixing.",
+            "Added a setting to stop WhoDoesWhat touching Blizzard group roles entirely.",
+            "Main tanks are no longer demoted during a fight.",
+            "Custom roles now require a name, a class, and a group role.",
+            "Show WhoDoesWhat roles in Blizzard unit tooltips, with optional class details.",
+            "Added a paladin blessing-spread overview to the PallyPower Differences window.",
+            "Added aura and Righteous Fury helpers to the Paladin Bar.",
+            "Added right-click shortcuts, tooltips, and per-row options to the status bars.",
+            "Added a settings cog to the Buffing Grid, and retired its Rescan button.",
+            "Fixed debuff bars hiding at full saturation.",
+        },
+    },
+    {
+        version = "1.0.9",
+        date = "2026-08-03",
+        notes = {
+            "Added support for improved thorns.",
+            "Added Minimap Button with shortcuts.",
+            "Improve Buff Tracking options for status bars + Grid.",
+            "Respect PallyPower Free Assignment permissions.",
+            "Improved PP buff-source mode, and diffs page.",
+            "Added About section with Update Notes.",
+            "Count only meaningful PallyPower blessing optimizations.",
+            "Use PallyPower talent data for unknown paladins.",
+        },
+    },
+    {
+        version = "1.0.8",
+        date = "2026-08-01",
+        notes = {
+            "Added WDW and PallyPower assignment-source modes.",
+            "Added PallyPower synchronization without requiring PallyPower locally.",
+            "Improved the main board, read-only views, and live buff-status whispers.",
+        },
+    },
+    {
+        version = "1.0.7",
+        date = "2026-07-30",
+        notes = {
+            "Added the observed PallyPower mirror and Buffing Grid source comparison.",
+            "Synchronized Paladin buff strategies and direct talent observations.",
+            "Added configurable status checks and improved buffing priority.",
+        },
+    },
+    {
+        version = "1.0.6",
+        date = "2026-07-29",
+        notes = {
+            "Added live core raid-buff coverage and expanded status bars.",
+            "Improved Paladin coverage controls, pet blessings, and buffing menus.",
+            "Added clearer addon-presence and version information to raid roles.",
+        },
+    },
+}

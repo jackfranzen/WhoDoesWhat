@@ -8,6 +8,17 @@ local aboutFrame
 local FRAME_W = 500
 local FRAME_H = 430
 local MARGIN = 14
+-- Same gutter the main window and Members reserve for their scrollbars.
+local SCROLLBAR_W = 26
+-- Padding between the notes well's edge and the text inside it.
+local WELL_PAD = 8
+-- The notes column: the box spans the window inside its margins, the well sits
+-- inside that by 12 a side, and the text inside the well by WELL_PAD a side --
+-- less the gutter the scrollbar keeps whether or not it is showing.
+local NOTES_W = FRAME_W - MARGIN * 2 - 24 - WELL_PAD * 2 - SCROLLBAR_W
+
+-- Newest first, from Releases.lua. This file draws them and owns none of them.
+local RELEASES = WhoDoesWhat.Releases
 
 local LINKS = {
     { label = "Video", value = "https://www.youtube.com/watch?v=g-M2CQ5YFB4" },
@@ -16,111 +27,23 @@ local LINKS = {
     { label = "Donate", value = "https://ko-fi.com/wallhackjack" },
 }
 
--- Newest first. Add one entry when cutting each tagged release; the first
--- entry is presented as the latest release in the window.
-local RELEASES = {
-    {
-        version = "1.1.0",
-        date = "2026-08-20",
-        notes = {
-            "Shift-right-click a status bar to announce who is still missing that buff in raid chat; editing moved to alt-right-click.",
-            "Action Items folded into the Members window: roles, talents, and what needs fixing in one place.",
-            "Ignore a blessing for part of the raid -- \"Sanctuary except for Tanks\" is now one rule.",
-            "A paladin running without PallyPower announces themselves to it, so they can be given assignments.",
-            "Raid assistants can set group roles by hand again.",
-            "Large-raid performance pass; the biggest gains are in a 40-man with several paladins.",
-        },
-    },
-    {
-        version = "1.0.11",
-        date = "2026-08-11",
-        notes = {
-            "Reworked Action Items and gave it a WDW Status row, with a Talents column in place of the old fix buttons.",
-            "Added \"Hide when nothing is yours to fix\" to the Action Items status row.",
-            "Roles that disagree with the last talent scan are now flagged.",
-            "Custom roles are shared with the raid, and default role overrides now apply to the raid instead of per profile.",
-            "Gave the roles grid its own row of column headings.",
-            "Paladin auras are picked from a hover grid instead of cycling.",
-            "Sated glows when a lust leaves raiders behind.",
-            "Hunter pets show their own name, with the owner behind it.",
-            "The promote prompt now reaches every assistant, including after a late promotion.",
-            "Rebuilt the buffing rules and consolidated blessing fallbacks; the best-available rule relaxes in combat.",
-            "PallyPower fixes skip roleless raiders, and the \"upsetting the raid\" warning only appears without rights.",
-            "Status bars are on by default, with clearer shortcuts.",
-            "Fixed accented names rendering half a byte as their initials.",
-            "Fixed roster repaints closing an open role dropdown, and a stale cache replay claiming a respec.",
-        },
-    },
-    {
-        version = "1.0.10",
-        date = "2026-08-06",
-        notes = {
-            "WhoDoesWhat no longer changes anyone's Blizzard group role on its own.",
-            "Added the Action Items window: group roles that don't match, and tanks not promoted to Main Tank.",
-            "Added an Actions button to the main window that glows when something needs fixing.",
-            "Added a setting to stop WhoDoesWhat touching Blizzard group roles entirely.",
-            "Main tanks are no longer demoted during a fight.",
-            "Custom roles now require a name, a class, and a group role.",
-            "Show WhoDoesWhat roles in Blizzard unit tooltips, with optional class details.",
-            "Added a paladin blessing-spread overview to the PallyPower Differences window.",
-            "Added aura and Righteous Fury helpers to the Paladin Bar.",
-            "Added right-click shortcuts, tooltips, and per-row options to the status bars.",
-            "Added a settings cog to the Buffing Grid, and retired its Rescan button.",
-            "Fixed debuff bars hiding at full saturation.",
-        },
-    },
-    {
-        version = "1.0.9",
-        date = "2026-08-03",
-        notes = {
-            "Added support for improved thorns.",
-            "Added Minimap Button with shortcuts.",
-            "Improve Buff Tracking options for status bars + Grid.",
-            "Respect PallyPower Free Assignment permissions.",
-            "Improved PP buff-source mode, and diffs page.",
-            "Added About section with Update Notes.",
-            "Count only meaningful PallyPower blessing optimizations.",
-            "Use PallyPower talent data for unknown paladins.",
-        },
-    },
-    {
-        version = "1.0.8",
-        date = "2026-08-01",
-        notes = {
-            "Added WDW and PallyPower assignment-source modes.",
-            "Added PallyPower synchronization without requiring PallyPower locally.",
-            "Improved the main board, read-only views, and live buff-status whispers.",
-        },
-    },
-    {
-        version = "1.0.7",
-        date = "2026-07-30",
-        notes = {
-            "Added the observed PallyPower mirror and Buffing Grid source comparison.",
-            "Synchronized Paladin buff strategies and direct talent observations.",
-            "Added configurable status checks and improved buffing priority.",
-        },
-    },
-    {
-        version = "1.0.6",
-        date = "2026-07-29",
-        notes = {
-            "Added live core raid-buff coverage and expanded status bars.",
-            "Improved Paladin coverage controls, pet blessings, and buffing menus.",
-            "Added clearer addon-presence and version information to raid roles.",
-        },
-    },
-}
-
-local function SetPanelBackdrop(frame)
+-- The panels this window is built from. `sunken` is the darker treatment for a
+-- well INSIDE a panel -- the notes sit in one, so the text reads as content
+-- held by the box rather than as more of the box.
+local function SetPanelBackdrop(frame, sunken)
     frame:SetBackdrop({
         bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
         tile = true, tileSize = 16, edgeSize = 12,
         insets = { left = 3, right = 3, top = 3, bottom = 3 },
     })
-    frame:SetBackdropColor(0.16, 0.16, 0.18, 0.9)
-    frame:SetBackdropBorderColor(0.4, 0.4, 0.4)
+    if sunken then
+        frame:SetBackdropColor(0.07, 0.07, 0.08, 0.95)
+        frame:SetBackdropBorderColor(0.3, 0.3, 0.3)
+    else
+        frame:SetBackdropColor(0.16, 0.16, 0.18, 0.9)
+        frame:SetBackdropBorderColor(0.4, 0.4, 0.4)
+    end
 end
 
 local function SetCopyValue(f, label, value)
@@ -141,6 +64,11 @@ local function SelectRelease(f, release)
         lines[#lines + 1] = "|cffd8d8d8- " .. note .. "|r"
     end
     f.releaseNotes:SetText(table.concat(lines, "\n\n"))
+    -- The scroll child is only ever as tall as the notes it holds, so the
+    -- template can drop the bar entirely on a short release. A new release
+    -- starts at its first line rather than wherever the last one was left.
+    f.releaseContent:SetHeight(f.releaseNotes:GetStringHeight() + 4)
+    f.releaseScroll:SetVerticalScroll(0)
 end
 
 local function EnsureAboutFrame()
@@ -267,9 +195,54 @@ local function EnsureAboutFrame()
     releaseDate:SetTextColor(0.65, 0.65, 0.65)
     f.releaseDate = releaseDate
 
-    local releaseNotes = updatesBox:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    releaseNotes:SetPoint("TOPLEFT", 12, -46)
-    releaseNotes:SetPoint("BOTTOMRIGHT", -12, 12)
+    -- A dozen notes runs off the bottom of this box, and how long a release
+    -- is not something this window gets to decide -- so the notes scroll. The
+    -- gutter is reserved whether or not the bar is showing, so the text does
+    -- not reflow as releases are picked.
+    local notesWell = CreateFrame("Frame", nil, updatesBox, "BackdropTemplate")
+    notesWell:SetPoint("TOPLEFT", 12, -42)
+    notesWell:SetPoint("BOTTOMRIGHT", -12, 10)
+    SetPanelBackdrop(notesWell, true)
+
+    local scroll = CreateFrame("ScrollFrame", "WhoDoesWhatAboutNotesScroll",
+        notesWell, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", WELL_PAD, -WELL_PAD)
+    scroll:SetPoint("BOTTOMRIGHT", -(WELL_PAD + SCROLLBAR_W), WELL_PAD)
+    scroll.scrollBarHideable = true
+    f.releaseScroll = scroll
+
+    -- The template's scrollbar is arrows and a thumb over nothing, so on a dark
+    -- well there is no track to see the thumb travel along. AceGUI's slider art
+    -- supplies one, a frame level behind the bar so the arrows stay on top, and
+    -- it follows the bar in and out of view.
+    local scrollBar = _G[scroll:GetName() .. "ScrollBar"]
+    if scrollBar then
+        local track = CreateFrame("Frame", nil, scroll, "BackdropTemplate")
+        track:SetAllPoints(scrollBar)
+        track:SetFrameLevel(math.max(scroll:GetFrameLevel(),
+            scrollBar:GetFrameLevel() - 1))
+        track:SetBackdrop({
+            bgFile = "Interface\\Buttons\\UI-SliderBar-Background",
+            edgeFile = "Interface\\Buttons\\UI-SliderBar-Border",
+            tile = true, tileSize = 8, edgeSize = 8,
+            insets = { left = 3, right = 3, top = 3, bottom = 3 },
+        })
+        scrollBar:HookScript("OnShow", function() track:Show() end)
+        scrollBar:HookScript("OnHide", function() track:Hide() end)
+        track:SetShown(scrollBar:IsShown())
+    end
+
+    local content = CreateFrame("Frame", nil, scroll)
+    -- Pin the scroll child explicitly or nothing renders until the window
+    -- moves (same fix as the main view).
+    content:SetPoint("TOPLEFT")
+    content:SetWidth(NOTES_W)
+    scroll:SetScrollChild(content)
+    f.releaseContent = content
+
+    local releaseNotes = content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    releaseNotes:SetPoint("TOPLEFT")
+    releaseNotes:SetWidth(NOTES_W)
     releaseNotes:SetJustifyH("LEFT")
     releaseNotes:SetJustifyV("TOP")
     f.releaseNotes = releaseNotes
@@ -292,4 +265,8 @@ function WhoDoesWhat:OpenAboutView()
     f.installedVersion:SetText("Installed version: v" .. tostring(self.VERSION or "?"))
     f:Show()
     f:Raise()
+    -- Re-measure the notes now the window is up: a wrapped string built while
+    -- the frame was hidden can report no height, which would leave the scroll
+    -- child too short to reach the bottom of a long release.
+    SelectRelease(f, f.selectedRelease)
 end

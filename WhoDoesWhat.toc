@@ -5,7 +5,7 @@
 ## Version: @project-version@
 #@debug@
 # Keep this literal synchronized with the release tag, it's used in additional add-on GUI and features
-## Version: 1.1.0
+## Version: 1.2.0
 #@end-debug@
 ## SavedVariables: WhoDoesWhatDB
 
@@ -36,6 +36,7 @@ Libs\LibCustomGlow-1.0\LibCustomGlow-1.0.lua
 
 # --- Main ---
 Core.lua
+Releases.lua
 Profiling.lua
 ClientFeatures.lua
 SlashCommands.lua
