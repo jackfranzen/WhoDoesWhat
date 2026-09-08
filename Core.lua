@@ -454,8 +454,10 @@ local defaults = {
             -- then ret, holy, a second ret). See FakeRaid.PALADINS.
             fakeRaidPaladinCount = 3,
             -- Master toggle for the Paladin Buffing Bar (the clickable Nova-style
-            -- blessing bar). Off by default. See Views/PaladinBuffingBarView.lua.
-            buffingBarEnabled = false,
+            -- blessing bar). See Views/PaladinBuffingBarView.lua. On: it only
+            -- ever appears for a paladin, so a raid of everyone else never sees
+            -- it, and a paladin who installs WDW is exactly who it is for.
+            buffingBarEnabled = true,
             -- Dev/testing: render the buffing bar even when the local player
             -- isn't a paladin, as the paladin named in buffingBarTestPaladin.
             buffingBarTestMode = false,
@@ -464,20 +466,26 @@ local defaults = {
             buffingBarTestPaladin = nil,
             -- Whether the buffing bar lays its buttons out as a row
             -- ("HORIZONTAL") or a column ("VERTICAL"). The orientation decides
-            -- which values the two grow settings below take.
-            buffingBarOrientation = "HORIZONTAL",
+            -- which values the two grow settings below take. A column by
+            -- default: one icon wide, it costs a screen edge rather than a
+            -- band across the middle, which is what the bar was tuned to in
+            -- actual raids -- and the three settings under it are the ones
+            -- that column wants.
+            buffingBarOrientation = "VERTICAL",
             -- Which way the buffing bar grows as blessings are added. Row:
             -- "RIGHT" (anchor its left edge), "LEFT" (anchor its right edge)
             -- or "CENTER" (anchor its midpoint, spreading both ways). Column:
             -- "DOWN" (anchor its top edge), "UP" (its bottom edge) or "CENTER".
-            buffingBarGrow = "RIGHT",
+            buffingBarGrow = "DOWN",
             -- Preferred direction for the per-player menu shown by hovering a
             -- class button -- "DOWN"/"UP" for a row, "RIGHT"/"LEFT" for a
             -- column. The view flips it when that side lacks screen room.
-            buffingMenuGrow = "DOWN",
+            buffingMenuGrow = "LEFT",
             -- Drop a class button off the bar while every member it covers is
-            -- buffed, leaving only the work still outstanding.
-            buffingBarHideCompleted = false,
+            -- buffed, leaving only the work still outstanding. On: a column of
+            -- outstanding work is the shape the bar is for, and a class comes
+            -- straight back when its blessing runs into the warning window.
+            buffingBarHideCompleted = true,
             -- How close to lapsing a blessing gets before the bar says so: a
             -- countdown over the class button and a yellow player row. 1-10.
             buffingMenuWarnMinutes = 6,

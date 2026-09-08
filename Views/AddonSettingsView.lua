@@ -1767,6 +1767,22 @@ local function EnsureSettingsFrame()
     yL = y0
     yL = AddHeading(paladinPage, CONTENT_X, yL, "Paladin Buffing Bar", 0.96, 0.55, 0.73)
 
+    -- Same place and same job as the Status Bars page's: on the heading line,
+    -- hard right, undoing the whole page at once.
+    local paladinReset = CreateFrame("Button", nil, paladinPage,
+        "UIPanelButtonTemplate")
+    paladinReset:SetSize(80, 22)
+    paladinReset:SetPoint("TOPRIGHT", paladinPage, "TOPRIGHT", -16, -(y0 - 2))
+    paladinReset:SetText("Defaults")
+    paladinReset:SetScript("OnClick", function()
+        WhoDoesWhat:ResetPaladinBarSettings()
+        f.RefreshPaladinPage()
+    end)
+    AddTooltip(paladinReset, "Reset Paladin Bar",
+        "Put every option on this page back to its default and move the bar"
+            .. " to where a fresh install finds it. Test mode on the Developer"
+            .. " page is left alone.")
+
     f.buffingBarCheck, yL = AddCompactCheckboxRow(paladinPage, CONTENT_X, yL, "Enable Paladin Buffing Bar",
         "Show a movable, clickable bar of your assigned blessings - a Nova-style alternative to PallyPower. Appears only when you're a paladin, unless test mode is on.",
         function(value)
@@ -1847,7 +1863,6 @@ local function EnsureSettingsFrame()
         UIDropDownMenu_SetText(menuGrowDD,
             GROW_LABELS[WhoDoesWhat:GetBuffingMenuGrow()])
     end
-    f.RefreshBuffingLayout = RefreshBuffingLayout
 
     UIDropDownMenu_Initialize(orientDD, function(_, level)
         local saved = BuffingAxis()
@@ -1918,6 +1933,19 @@ local function EnsureSettingsFrame()
     f.buffingWarnDD = warnDD
     f.RefreshBuffingWarn = function()
         UIDropDownMenu_SetText(warnDD, WarnLabel(WhoDoesWhat:GetBuffingWarnMinutes()))
+    end
+
+    -- Every widget on this page, read back out of the settings. Called when the
+    -- window opens and again after the Defaults button has rewritten them.
+    f.RefreshPaladinPage = function()
+        local settings = WhoDoesWhat.db.profile.settings
+        f.buffingBarCheck:SetChecked(settings.buffingBarEnabled)
+        f.buffingAuraCheck:SetChecked(settings.buffingBarAuraButton ~= false)
+        f.buffingRighteousFuryCheck:SetChecked(
+            settings.buffingBarRighteousFury ~= false)
+        f.buffingHideCompletedCheck:SetChecked(settings.buffingBarHideCompleted)
+        RefreshBuffingLayout()
+        f.RefreshBuffingWarn()
     end
 
     -- ---- Warrior ----
@@ -2257,12 +2285,7 @@ function WhoDoesWhat:OpenAddonSettingsView(section)
 
     local settings = self.db.profile.settings
     f.minimapCheck:SetChecked(not settings.minimapButton.hide)
-    f.buffingBarCheck:SetChecked(settings.buffingBarEnabled)
-    f.RefreshBuffingLayout()
-    f.buffingHideCompletedCheck:SetChecked(settings.buffingBarHideCompleted)
-    f.RefreshBuffingWarn()
-    f.buffingAuraCheck:SetChecked(settings.buffingBarAuraButton ~= false)
-    f.buffingRighteousFuryCheck:SetChecked(settings.buffingBarRighteousFury ~= false)
+    f.RefreshPaladinPage()
     f.buffingTestCheck:SetChecked(settings.buffingBarTestMode)
     RefreshBuffingTestPaladinDropdown(f)
     f.unitTooltipCheck:SetChecked(settings.unitTooltipRole ~= false)

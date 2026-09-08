@@ -2305,6 +2305,32 @@ function WhoDoesWhat:RefreshPaladinBuffingBar()
     if bar.auraButton:IsShown() then PositionAuraMenu(bar.auraButton) end
 end
 
+-- Everything the Paladin Bar settings page owns. The Developer page's test
+-- mode and its paladin pick are not this page's to undo, and neither is the
+-- aura the swapper happens to be offering -- that is live state, not a setting.
+local RESET_SETTINGS = {
+    "buffingBarEnabled", "buffingBarAuraButton", "buffingBarRighteousFury",
+    "buffingBarHideCompleted", "buffingBarOrientation", "buffingBarGrow",
+    "buffingMenuGrow", "buffingMenuWarnMinutes",
+}
+
+function WhoDoesWhat:ResetPaladinBarSettings()
+    local settings = self.db.profile.settings
+    -- Straight from the profile defaults rather than from a second list of
+    -- values here, so the button and a fresh install cannot disagree.
+    local defaults = self.db.defaults and self.db.defaults.profile
+        and self.db.defaults.profile.settings or {}
+    for _, key in ipairs(RESET_SETTINGS) do
+        settings[key] = defaults[key]
+    end
+    -- Dropped rather than placed by hand: with no saved position LoadPosition
+    -- puts the bar where a fresh install finds it, which is what the button
+    -- promises.
+    settings.buffingBarPos = nil
+    if bar then LoadPosition() end
+    self:UpdatePaladinBuffingBarVisibility()
+end
+
 -- Show or hide the whole bar based on the master/test toggles, then repaint.
 -- Test mode stays visible without a paladin so roster updates can fill it in.
 function WhoDoesWhat:UpdatePaladinBuffingBarVisibility()
