@@ -1420,13 +1420,19 @@ local function EnsureSettingsFrame()
 
     local highlightPreview = CreateFrame("Frame", nil, statusPage)
     highlightPreview:SetSize(56, 18)
-    -- Enough clearance for the styles that draw outside the box (the arrows
+    -- Enough clearance for the styles that draw outside the box (the wings
     -- flank it the way they flank a status row).
     highlightPreview:SetPoint("LEFT", highlightDD, "RIGHT", 28, 2)
-    local previewBg = highlightPreview:CreateTexture(nil, "BACKGROUND")
+    -- Built like a status row rather than as one flat frame: the sample's own
+    -- art lives on a child frame, and the box sits a few levels above the page,
+    -- so the styles that draw behind a row land behind this too.
+    highlightPreview:SetFrameLevel(statusPage:GetFrameLevel() + 3)
+    local previewBody = CreateFrame("Frame", nil, highlightPreview)
+    previewBody:SetAllPoints()
+    local previewBg = previewBody:CreateTexture(nil, "BACKGROUND")
     previewBg:SetAllPoints()
     previewBg:SetColorTexture(0.16, 0.16, 0.18, 1)
-    local previewFill = highlightPreview:CreateTexture(nil, "ARTWORK")
+    local previewFill = previewBody:CreateTexture(nil, "ARTWORK")
     previewFill:SetPoint("TOPLEFT", 1, -1)
     previewFill:SetPoint("BOTTOMLEFT", 1, 1)
     previewFill:SetWidth(34)
@@ -1434,14 +1440,23 @@ local function EnsureSettingsFrame()
     f.overviewHighlightPreview = highlightPreview
 
     local function ApplyHighlightPreview(styleKey)
+        -- Off and on again: the colour and the size are read at start, so a
+        -- style that is already running has to be rebuilt to pick either up.
+        WhoDoesWhat:ApplyStatusBarHighlight(highlightPreview, false, styleKey)
         WhoDoesWhat:ApplyStatusBarHighlight(highlightPreview, true, styleKey)
     end
     f.ApplyHighlightPreview = ApplyHighlightPreview
 
+    local function SavedHighlightStyle()
+        local styles, _, default = WhoDoesWhat:GetStatusBarHighlightStyles()
+        local saved = WhoDoesWhat.db.profile.settings.statusBarHighlightStyle
+        if not styles[saved] then saved = default end
+        return saved, styles
+    end
+
     UIDropDownMenu_Initialize(highlightDD, function(_, level)
         local styles, order = WhoDoesWhat:GetStatusBarHighlightStyles()
-        local saved = WhoDoesWhat.db.profile.settings.statusBarHighlightStyle
-        if not styles[saved] then saved = "spinFast" end
+        local saved = SavedHighlightStyle()
         for _, key in ipairs(order) do
             local styleKey = key
             local info = UIDropDownMenu_CreateInfo()
@@ -1460,7 +1475,88 @@ local function EnsureSettingsFrame()
         "The animation a status bar uses when it wants your attention -- the"
             .. " box to the right shows it running.")
     f.overviewHighlightDD = highlightDD
-    yL = yL + 32
+
+    -- One colour for whichever style is selected, rather than a colour baked
+    -- into each one. Sits under the dropdown so the sample box beside it shows
+    -- the change as it is dragged.
+    local highlightColorLabel = statusPage:CreateFontString(nil, "OVERLAY",
+        "GameFontHighlight")
+    highlightColorLabel:SetPoint("TOPLEFT", CONTENT_X + 4, -(yL + 36))
+    highlightColorLabel:SetText("Highlight color:")
+    local highlightSwatch = CreateFrame("Button", nil, statusPage)
+    highlightSwatch:SetSize(22, 11)
+    highlightSwatch:SetPoint("LEFT", highlightColorLabel, "RIGHT", 6, 0)
+    highlightSwatch:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    local highlightSwatchColor = highlightSwatch:CreateTexture(nil, "ARTWORK")
+    highlightSwatchColor:SetAllPoints()
+    highlightSwatch.color = highlightSwatchColor
+    f.overviewHighlightSwatch = highlightSwatch
+
+    local function RefreshHighlightColor()
+        highlightSwatchColor:SetColorTexture(
+            WhoDoesWhat:GetStatusBarHighlightColor())
+        ApplyHighlightPreview(SavedHighlightStyle())
+        WhoDoesWhat:RefreshStatusBarHighlights()
+    end
+    f.RefreshHighlightColor = RefreshHighlightColor
+
+    local function OpenHighlightColorPicker()
+        CancelActiveColorPicker()
+        local saved = WhoDoesWhat.db.profile.settings.statusBarHighlightColor
+        local original = saved
+            and { r = saved.r, g = saved.g, b = saved.b } or nil
+        local r, g, b = WhoDoesWhat:GetStatusBarHighlightColor()
+        local function Apply(nr, ng, nb)
+            WhoDoesWhat.db.profile.settings.statusBarHighlightColor =
+                { r = nr, g = ng, b = nb }
+            RefreshHighlightColor()
+        end
+        local function Changed()
+            Apply(ColorPickerFrame:GetColorRGB())
+        end
+        local function Cancel()
+            if activeColorPickerCancel == Cancel then
+                activeColorPickerCancel = nil
+            end
+            WhoDoesWhat.db.profile.settings.statusBarHighlightColor = original
+            RefreshHighlightColor()
+        end
+        ColorPickerFrame:SetFrameStrata("FULLSCREEN_DIALOG")
+        ColorPickerFrame:SetFrameLevel(statusPage:GetFrameLevel() + 30)
+        ColorPickerFrame:SetClampedToScreen(true)
+        if ColorPickerFrame.SetupColorPickerAndShow then
+            ColorPickerFrame:SetupColorPickerAndShow({
+                r = r, g = g, b = b,
+                hasOpacity = false,
+                swatchFunc = Changed,
+                cancelFunc = Cancel,
+            })
+        else
+            ColorPickerFrame.func = Changed
+            ColorPickerFrame.hasOpacity = false
+            ColorPickerFrame.opacityFunc = nil
+            ColorPickerFrame.cancelFunc = Cancel
+            ColorPickerFrame:SetColorRGB(r, g, b)
+            ColorPickerFrame:Show()
+        end
+        activeColorPickerCancel = Cancel
+    end
+
+    highlightSwatch:SetScript("OnClick", function(_, button)
+        if button == "RightButton" then
+            WhoDoesWhat.db.profile.settings.statusBarHighlightColor = nil
+            RefreshHighlightColor()
+        else
+            OpenHighlightColorPicker()
+        end
+    end)
+    AddTooltip(highlightColorLabel, "Highlight color",
+        "The color every highlight style is drawn in. Right-click the swatch"
+            .. " to reset it.")
+    AddTooltip(highlightSwatch, "Highlight color",
+        "Left-click for the WoW color picker; right-click to reset.")
+
+    yL = yL + 64
 
     -- ---- Buff Tracking ----
     local statusBuffPage = pages[3]
@@ -2142,12 +2238,16 @@ function WhoDoesWhat:OpenAddonSettingsView(section)
             or STATUS_TOOLTIP_ANCHOR_LABELS.LEFT)
     UIDropDownMenu_SetText(f.overviewTooltipNamesDD,
         tostring(settings.statusBarTooltipNames or DEFAULT_TOOLTIP_NAMES))
-    local highlightStyles = WhoDoesWhat:GetStatusBarHighlightStyles()
+    local highlightStyles, _, defaultHighlight =
+        WhoDoesWhat:GetStatusBarHighlightStyles()
     local highlightStyle = settings.statusBarHighlightStyle
-    if not highlightStyles[highlightStyle] then highlightStyle = "spinFast" end
+    if not highlightStyles[highlightStyle] then
+        highlightStyle = defaultHighlight
+    end
     UIDropDownMenu_SetText(f.overviewHighlightDD,
         highlightStyles[highlightStyle].label)
-    f.ApplyHighlightPreview(highlightStyle)
+    -- Paints the swatch and restarts the sample in one go.
+    f.RefreshHighlightColor()
     RefreshStatusBuffRows(f)
     f.devModeCheck:SetChecked(settings.developerMode)
     f.showLogsCheck:SetChecked(settings.showLogsButton)

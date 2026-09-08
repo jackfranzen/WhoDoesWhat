@@ -534,7 +534,9 @@ local defaults = {
             statusBarTooltipNames = 10,
             -- Which animation a status row uses when it highlights
             -- (see HIGHLIGHT_STYLES in StatusBarsView).
-            statusBarHighlightStyle = "spinFast",
+            statusBarHighlightStyle = "spin",
+            -- nil means LibCustomGlow's yellow; the picker writes {r,g,b}.
+            statusBarHighlightColor = nil,
             overviewWidth = 220,
             statusBarChecks = {},
         },

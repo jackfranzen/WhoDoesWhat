@@ -19,6 +19,10 @@ local PAD = 4
 local TITLE_H = 12
 local CONTENT_TOP = INSET + TITLE_H + 3
 local ROW_H = 19
+-- Rows sit three levels above the window rather than the default one, so the
+-- highlight styles that draw behind a row have a level of their own to sit at
+-- that is still above the window's backdrop.
+local ROW_LEVEL = 3
 local ICON_SIZE = 18
 local BAR_H = 18
 local EMPTY_ICON_SIZE = math.floor(BAR_H * 0.8 + 0.5)
@@ -559,8 +563,6 @@ end
 -- your threat. The plate goes *behind* the row rather than on top of it, so it
 -- never sits over the icon or the text, and two highlighted neighbours merge
 -- into one band instead of stacking into a double-width line.
-local OUTLINE_COLOR = { 0.95, 0.95, 0.32 }
-local ARROW_COLOR = { 1, 0.25, 0.2 }
 local OUTLINE_TH = 2
 local ARROW_W = 12
 -- The wings sit in the window's margin, and at the old 2px they read as part
@@ -572,6 +574,25 @@ local PULSE_MIN_ALPHA = 0.2
 -- fade, so the row stays equally readable at both ends of the swing.
 local BOB_SECONDS = 0.7
 local BOB_PX = 5
+
+-- One colour for every style, so the setting is "what colour is the highlight"
+-- rather than one answer per effect. The default is LibCustomGlow's own yellow,
+-- which is what the spinning styles were already drawn in.
+local DEFAULT_HIGHLIGHT_COLOR = { r = 0.95, g = 0.95, b = 0.32 }
+
+function WhoDoesWhat:GetStatusBarHighlightColor()
+    local c = WhoDoesWhat.db.profile.settings.statusBarHighlightColor
+        or DEFAULT_HIGHLIGHT_COLOR
+    return c.r, c.g, c.b
+end
+
+-- LibCustomGlow wants {r,g,b,a}, and it keeps the table it is handed on the
+-- running effect and reads it again later -- so this hands out a fresh one
+-- rather than a shared table that would recolour effects already up.
+local function HighlightColor()
+    local r, g, b = WhoDoesWhat:GetStatusBarHighlightColor()
+    return { r, g, b, 1 }
+end
 
 -- The nameplate side arrows are atlas art, and not every client that runs
 -- this addon has that atlas. Where it is missing, the spellbook page arrows
@@ -591,7 +612,6 @@ local function SetArrowArt(tex, side)
         for _, atlas in ipairs(ARROW_ATLASES[side]) do
             if info(atlas) then
                 tex:SetAtlas(atlas)
-                tex:SetVertexColor(unpack(ARROW_COLOR))
                 return
             end
         end
@@ -599,12 +619,12 @@ local function SetArrowArt(tex, side)
     -- The page arrows point outward from their own frame, so each one takes
     -- the file for the opposite side to end up pointing at the row.
     tex:SetTexture(ARROW_FALLBACK[side])
-    tex:SetVertexColor(unpack(ARROW_COLOR))
 end
 
 -- Parented to the row's parent rather than the row, one frame level below it:
 -- a child frame always draws above its parent's own textures, so the only way
--- to get underneath the bar is to be its sibling. Anchoring is unaffected by
+-- to get underneath the bar is to be its sibling. Rows sit at ROW_LEVEL above
+-- the window precisely to leave that level free. Anchoring is unaffected by
 -- parentage, so the plate still tracks the row.
 local function EnsurePlate(frame)
     local plate = frame.wdwPlate
@@ -618,9 +638,8 @@ local function EnsurePlate(frame)
     plate:SetPoint("BOTTOMRIGHT", frame, "TOPRIGHT",
         OUTLINE_TH, -(math.min(BAR_H, frame:GetHeight()) + OUTLINE_TH))
 
-    local fill = plate:CreateTexture(nil, "BACKGROUND")
-    fill:SetAllPoints()
-    fill:SetColorTexture(unpack(OUTLINE_COLOR))
+    plate.fill = plate:CreateTexture(nil, "BACKGROUND")
+    plate.fill:SetAllPoints()
 
     local pulse = plate:CreateAnimationGroup()
     pulse:SetLooping("BOUNCE")
@@ -638,6 +657,7 @@ end
 local function StartPlate(frame, pulsing)
     local plate = EnsurePlate(frame)
     plate:SetFrameLevel(math.max(0, frame:GetFrameLevel() - 1))
+    plate.fill:SetColorTexture(WhoDoesWhat:GetStatusBarHighlightColor())
     plate.pulse:Stop()
     plate:SetAlpha(1)
     plate:Show()
@@ -668,6 +688,7 @@ local function EnsureWings(frame)
         local tex = wing:CreateTexture(nil, "OVERLAY")
         tex:SetAllPoints()
         SetArrowArt(tex, side)
+        wing.tex = tex
 
         local bob = wing:CreateAnimationGroup()
         bob:SetLooping("BOUNCE")
@@ -702,8 +723,10 @@ local function StartWings(frame, motion)
     -- Wings are square and track the row's height, which changes with the
     -- window's scale, so size them at start rather than once at creation.
     local height = math.max(8, math.floor(frame:GetHeight() + 0.5))
+    local r, g, b = WhoDoesWhat:GetStatusBarHighlightColor()
     for _, wing in pairs(overlay.wings) do
         wing:SetSize(ARROW_W, height)
+        wing.tex:SetVertexColor(r, g, b)
         wing.bob:Stop()
         if motion == "bob" then wing.bob:Play() end
     end
@@ -721,21 +744,41 @@ local function StopWings(frame)
     overlay:Hide()
 end
 
--- Spinning dots are spaced around the row's perimeter, so a fixed count that
--- looks right at 220px reads as a handful of lonely specks at 500px. Count and
--- dash length come from the perimeter instead, and the effect is restarted
--- once the window has settled at a new width.
-local SPIN_SPACING = 26
-local SPIN_MIN_N, SPIN_MAX_N = 8, 40
+-- Spinning dashes are spaced around the row's perimeter, so a fixed count that
+-- looks right at 220px reads as a handful of lonely specks at 500px, and a
+-- fixed loop time means the same lap over a longer track -- the dashes race
+-- away as the window widens. Count comes from the perimeter and the loop time
+-- comes from the perimeter too, which holds the dashes at one speed in pixels
+-- per second whatever the window is doing.
+local SPIN_SPACING = 15
+local SPIN_LENGTH_RATIO = 0.3
+local SPIN_SPEED = 38
+local SPIN_MIN_N, SPIN_MAX_N = 10, 64
 
-local function StartSpin(frame, period, thickness, lengthRatio)
+local function StartSpin(frame)
     local width, height = frame:GetSize()
     local perimeter = 2 * (width + height)
     local n = math.floor(perimeter / SPIN_SPACING + 0.5)
     n = math.max(SPIN_MIN_N, math.min(SPIN_MAX_N, n))
-    local length = math.max(3, math.floor(perimeter / n * lengthRatio + 0.5))
-    LCG.PixelGlow_Start(frame, nil, n, 1 / period, length, thickness,
-        nil, nil, nil, nil, 4)
+    local length = math.max(3,
+        math.floor(perimeter / n * SPIN_LENGTH_RATIO + 0.5))
+    LCG.PixelGlow_Start(frame, HighlightColor(), n, SPIN_SPEED / perimeter,
+        length, 1, nil, nil, nil, nil, 4)
+end
+
+-- LibCustomGlow's button glow is the spell-activation art plus a ring of
+-- marching ants. The ants are the only part of it that keeps moving, so the
+-- still version is the same effect with them switched off and the per-frame
+-- update dropped. Frame level 0 puts it at the row's own level, under every
+-- child frame the row draws its icon and its text on.
+local function StartButtonGlow(frame, animated)
+    LCG.ButtonGlow_Start(frame, HighlightColor(), 0.35, 0)
+    local glow = frame._ButtonGlow
+    if not glow then return end
+    -- The glow frames come from a pool, so the still variant has to put the
+    -- ants back rather than leave them hidden for whoever gets the frame next.
+    glow.ants:SetShown(animated)
+    if not animated then glow:SetScript("OnUpdate", nil) end
 end
 
 -- The row highlight ("some of these are missing") as a set of named looks, so
@@ -744,27 +787,19 @@ end
 -- changing the setting restarts it in place instead of leaving the old
 -- animation attached.
 local HIGHLIGHT_STYLES = {
-    spinFast = {
-        label = "Spinning (fast)",
-        Start = function(r) StartSpin(r, 4, 1, 0.35) end,
+    spin = {
+        label = "Spinning",
+        Start = StartSpin,
         Stop = function(r) LCG.PixelGlow_Stop(r) end,
     },
-    spinSlow = {
-        -- Longer and thicker than the fast one. LibCustomGlow snaps every dash
-        -- to whole pixels, and at a slow crawl a 3x1 speck stepping one pixel
-        -- at a time is what reads as a low frame rate -- the update itself is
-        -- already per-frame. A fatter dash makes each step a smaller fraction
-        -- of the thing that is moving, so the same crawl looks smooth.
-        label = "Spinning (slow)",
-        Start = function(r) StartSpin(r, 8, 2, 0.6) end,
-        Stop = function(r) LCG.PixelGlow_Stop(r) end,
+    glow = {
+        label = "Glow",
+        Start = function(r) StartButtonGlow(r, false) end,
+        Stop = function(r) LCG.ButtonGlow_Stop(r) end,
     },
     flash = {
-        -- Frame level 0 puts the glow at the row's own level, which is under
-        -- the status bar child that carries the name and the percentage, so it
-        -- halos the row instead of washing out what the row says.
         label = "Pulsing glow",
-        Start = function(r) LCG.ButtonGlow_Start(r, nil, 0.35, 0) end,
+        Start = function(r) StartButtonGlow(r, true) end,
         Stop = function(r) LCG.ButtonGlow_Stop(r) end,
     },
     outline = {
@@ -799,12 +834,14 @@ local HIGHLIGHT_STYLES = {
     },
 }
 local HIGHLIGHT_STYLE_ORDER = {
-    "spinFast", "spinSlow", "flash", "outline", "outlinePulse",
+    "spin", "glow", "flash", "outline", "outlinePulse",
     "arrows", "arrowsPulse", "arrowsBob", "none",
 }
+-- Anything saved under a key that has since been dropped falls back to this.
+local DEFAULT_HIGHLIGHT_STYLE = "spin"
 
 function WhoDoesWhat:GetStatusBarHighlightStyles()
-    return HIGHLIGHT_STYLES, HIGHLIGHT_STYLE_ORDER
+    return HIGHLIGHT_STYLES, HIGHLIGHT_STYLE_ORDER, DEFAULT_HIGHLIGHT_STYLE
 end
 
 -- `styleKey` is for the settings preview, which shows one specific style
@@ -813,7 +850,9 @@ function WhoDoesWhat:ApplyStatusBarHighlight(frame, shown, styleKey)
     if not LCG then return end
     if not styleKey then
         styleKey = WhoDoesWhat.db.profile.settings.statusBarHighlightStyle
-        if not HIGHLIGHT_STYLES[styleKey] then styleKey = "spinFast" end
+        if not HIGHLIGHT_STYLES[styleKey] then
+            styleKey = DEFAULT_HIGHLIGHT_STYLE
+        end
     end
     local running = frame.glowStyle
     if running and (not shown or running ~= styleKey) then
@@ -826,11 +865,11 @@ function WhoDoesWhat:ApplyStatusBarHighlight(frame, shown, styleKey)
     end
 end
 
--- Every style is sized for the row it sits on at the moment it starts, so a
--- drag that is still moving would have to tear them all down and build them
--- again each frame. They go away for the length of the drag instead and come
--- back once the width has settled. `glowWanted` is what the last repaint asked
--- for, kept so the resume knows which rows to light again.
+-- Every style is sized and coloured for the row it sits on at the moment it
+-- starts, so a drag that is still moving would have to tear them all down and
+-- build them again each frame. They go away for the length of the drag instead
+-- and come back once the width has settled. `glowWanted` is what the last
+-- repaint asked for, kept so the resume knows which rows to light again.
 local highlightsSuspended = false
 
 local function SetRowGlow(row, shown)
@@ -848,6 +887,12 @@ local function RefreshRowGlows()
     end
     for _, row in ipairs(view.rows or {}) do apply(row) end
     for _, row in pairs(view.stateRows or {}) do apply(row) end
+end
+
+-- The colour picker's live preview: restart whatever is running so it picks
+-- the new colour up on the way back in.
+function WhoDoesWhat:RefreshStatusBarHighlights()
+    RefreshRowGlows()
 end
 
 local function SuspendRowGlows(suspend)
@@ -1445,6 +1490,7 @@ end
 local function CreateRow(index)
     local row = CreateFrame("Frame", nil, view)
     row:SetSize(view:GetWidth() - INSET * 2 - PAD * 2, ROW_H)
+    row:SetFrameLevel(view:GetFrameLevel() + ROW_LEVEL)
     -- A mouse-enabled row swallows what the window behind it would have
     -- handled, so it carries the Alt-drag and shift-click shortcuts itself.
     AttachAltDrag(row)
@@ -1459,13 +1505,21 @@ local function CreateRow(index)
     row:SetScript("OnEnter", ShowRowTooltip)
     row:SetScript("OnLeave", HideRowTooltip)
 
-    local icon = row:CreateTexture(nil, "ARTWORK")
-    icon:SetSize(ICON_SIZE, ICON_SIZE)
-    icon:SetPoint("TOPLEFT", 0, 0)
+    -- The icon rides its own child frame rather than sitting straight on the
+    -- row. The styles that draw behind the row draw behind the row's *frames*;
+    -- a texture on the row itself is below them, which left the glow washing
+    -- out the icon while it sat correctly behind everything else.
+    local iconHost = CreateFrame("Frame", nil, row)
+    iconHost:SetSize(ICON_SIZE, ICON_SIZE)
+    iconHost:SetPoint("TOPLEFT", 0, 0)
+    row.iconHost = iconHost
+
+    local icon = iconHost:CreateTexture(nil, "ARTWORK")
+    icon:SetAllPoints()
     icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
     row.icon = icon
 
-    local initial = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    local initial = iconHost:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     initial:SetPoint("CENTER", icon, "CENTER")
     local font, size = initial:GetFont()
     if font then initial:SetFont(font, size + 1, "OUTLINE") end
@@ -1512,6 +1566,7 @@ local function CreateStateRow(key)
     local kind = STATE_ROW_TYPES[key]
     local row = CreateFrame("Button", nil, view)
     row:SetSize(view:GetWidth() - INSET * 2 - PAD * 2, ROW_H)
+    row:SetFrameLevel(view:GetFrameLevel() + ROW_LEVEL)
     row.optionsKey = key
     -- Same as the bar rows: a mouse-enabled row swallows the drag the window
     -- behind it would have handled, so it has to carry Alt-drag itself.
@@ -1542,7 +1597,14 @@ local function CreateStateRow(key)
     highlight:SetColorTexture(1, 1, 1, 0.04)
     row.highlight = highlight
 
-    local badge = kind.CreateIcon(row)
+    -- Same reason as the bar rows: the badge goes on a child frame so the
+    -- styles that draw behind the row stay behind it.
+    local iconHost = CreateFrame("Frame", nil, row)
+    iconHost:SetSize(ICON_SIZE, ICON_SIZE)
+    iconHost:SetPoint("TOPLEFT", 0, 0)
+    row.iconHost = iconHost
+
+    local badge = kind.CreateIcon(iconHost)
     badge:SetPoint("TOPLEFT", 0, 0)
 
     local body = CreateFrame("Frame", nil, row)
