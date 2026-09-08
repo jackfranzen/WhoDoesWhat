@@ -1185,7 +1185,11 @@ local function WhisperLabel(row)
     return "Whisper Buffers"
 end
 
-local function ShowRowTooltip(frame)
+-- Where anything this window hovers puts its tooltip: beside the window on the
+-- side with room, or above/below it. The title strip shares it with the rows so
+-- the whole window's tooltips arrive from one direction instead of the strip's
+-- appearing over the bars it is sitting on top of.
+local function PlaceTooltip(frame)
     GameTooltip:SetOwner(frame, "ANCHOR_NONE")
     GameTooltip:ClearAllPoints()
     local anchor = TooltipAnchor()
@@ -1198,6 +1202,10 @@ local function ShowRowTooltip(frame)
     else
         GameTooltip:SetPoint("TOPRIGHT", frame, "TOPLEFT", -6, 0)
     end
+end
+
+local function ShowRowTooltip(frame)
+    PlaceTooltip(frame)
     frame:FillTooltip()
     -- Every row that knows which check it draws carries the shortcuts that act
     -- on it, after its own content and grouped by modifier like the window's:
@@ -1531,13 +1539,21 @@ local function ApplyResizeBounds()
     end
 end
 
+-- The strip is TITLE_H tall, so the badge has to fit inside that with room to
+-- breathe rather than setting the height itself.
+local TITLE_ICON = TITLE_H - 2
+
 local function LayoutHeader()
-    local compact = view:GetWidth() < MIN_W
+    -- Centred and badged: with the coverage percentage gone the strip carries
+    -- one thing, and a lone label hugging the left edge of a window this narrow
+    -- read as an afterthought. The name shortens before the badge does -- the
+    -- icon is what says whose window this is at a glance.
     view.titleText:Show()
-    view.titleText:SetText(view:GetWidth() < ULTRA_COMPACT_W
-        and "Status" or "WDW Status")
+    view.titleText:SetText("|T" .. WhoDoesWhat.ADDON_ICON .. ":"
+        .. TITLE_ICON .. ":" .. TITLE_ICON .. ":0:0|t "
+        .. (view:GetWidth() < ULTRA_COMPACT_W and "Status" or "WDW Status"))
     view.titleText:ClearAllPoints()
-    view.titleText:SetPoint("LEFT", compact and 2 or 5, 0)
+    view.titleText:SetPoint("CENTER", 0, 0)
 end
 
 local function LayoutResizeHandle()
@@ -1598,7 +1614,7 @@ local function EnsureView()
     AttachAltDrag(title)
     title:SetScript("OnMouseUp", StatusBarsClick)
     title:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        PlaceTooltip(self)
         -- Signed like the Paladin Bar's: a loose window on a busy screen, and
         -- this is the one place it can say whose it is.
         GameTooltip:SetText("|T" .. WhoDoesWhat.ADDON_ICON .. ":16:16:0:0|t "
