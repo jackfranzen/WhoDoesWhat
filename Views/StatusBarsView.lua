@@ -554,18 +554,24 @@ local function SetRowOffsetCached(row, offset)
     row:SetPoint("TOPLEFT", view, "TOPLEFT", INSET + PAD, -offset)
 end
 
--- The styles LibCustomGlow does not cover: a plain outline drawn from four
--- edge textures, and the pair of arrows a nameplate wears on its sides when
--- it has your threat. Both hang off the row as one child frame, so switching
--- styles is a Hide and pulsing is a fade of that one frame rather than of
--- every piece in it.
+-- The styles LibCustomGlow does not cover: a backing plate that shows as a
+-- border, and the pair of arrows a nameplate wears on its sides when it has
+-- your threat. The plate goes *behind* the row rather than on top of it, so it
+-- never sits over the icon or the text, and two highlighted neighbours merge
+-- into one band instead of stacking into a double-width line.
 local OUTLINE_COLOR = { 0.95, 0.95, 0.32 }
 local ARROW_COLOR = { 1, 0.25, 0.2 }
 local OUTLINE_TH = 2
 local ARROW_W = 12
-local ARROW_GAP = 2
+-- The wings sit in the window's margin, and at the old 2px they read as part
+-- of the row's border rather than as something pointing at it.
+local ARROW_GAP = 6
 local PULSE_SECONDS = 0.6
 local PULSE_MIN_ALPHA = 0.2
+-- The bob is a position change only: the wings drift out and back in and never
+-- fade, so the row stays equally readable at both ends of the swing.
+local BOB_SECONDS = 0.7
+local BOB_PX = 5
 
 -- The nameplate side arrows are atlas art, and not every client that runs
 -- this addon has that atlas. Where it is missing, the spellbook page arrows
@@ -596,7 +602,59 @@ local function SetArrowArt(tex, side)
     tex:SetVertexColor(unpack(ARROW_COLOR))
 end
 
-local function EnsureOverlay(frame)
+-- Parented to the row's parent rather than the row, one frame level below it:
+-- a child frame always draws above its parent's own textures, so the only way
+-- to get underneath the bar is to be its sibling. Anchoring is unaffected by
+-- parentage, so the plate still tracks the row.
+local function EnsurePlate(frame)
+    local plate = frame.wdwPlate
+    if plate then return plate end
+
+    plate = CreateFrame("Frame", nil, frame:GetParent())
+    plate:SetPoint("TOPLEFT", frame, "TOPLEFT", -OUTLINE_TH, OUTLINE_TH)
+    -- Bottom-anchored to the bar's height rather than the row's: a row is a
+    -- pixel taller than the bar it draws, and squaring the plate off on the row
+    -- would leave a fatter band under the bar than over it.
+    plate:SetPoint("BOTTOMRIGHT", frame, "TOPRIGHT",
+        OUTLINE_TH, -(math.min(BAR_H, frame:GetHeight()) + OUTLINE_TH))
+
+    local fill = plate:CreateTexture(nil, "BACKGROUND")
+    fill:SetAllPoints()
+    fill:SetColorTexture(unpack(OUTLINE_COLOR))
+
+    local pulse = plate:CreateAnimationGroup()
+    pulse:SetLooping("BOUNCE")
+    local fade = pulse:CreateAnimation("Alpha")
+    fade:SetDuration(PULSE_SECONDS)
+    fade:SetFromAlpha(1)
+    fade:SetToAlpha(PULSE_MIN_ALPHA)
+    plate.pulse = pulse
+
+    plate:Hide()
+    frame.wdwPlate = plate
+    return plate
+end
+
+local function StartPlate(frame, pulsing)
+    local plate = EnsurePlate(frame)
+    plate:SetFrameLevel(math.max(0, frame:GetFrameLevel() - 1))
+    plate.pulse:Stop()
+    plate:SetAlpha(1)
+    plate:Show()
+    if pulsing then plate.pulse:Play() end
+end
+
+local function StopPlate(frame)
+    local plate = frame.wdwPlate
+    if not plate then return end
+    plate.pulse:Stop()
+    plate:Hide()
+end
+
+-- Each wing is its own frame so the bob can be a Translation on the frame --
+-- animating a bare texture needs SetTarget, which not every client this addon
+-- runs on has.
+local function EnsureWings(frame)
     local overlay = frame.wdwHighlight
     if overlay then return overlay end
 
@@ -604,32 +662,27 @@ local function EnsureOverlay(frame)
     overlay:SetAllPoints(frame)
     overlay:SetFrameLevel(frame:GetFrameLevel() + 4)
 
-    overlay.edges = {}
-    for _, edge in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
-        local tex = overlay:CreateTexture(nil, "OVERLAY")
-        tex:SetColorTexture(unpack(OUTLINE_COLOR))
-        if edge == "TOP" or edge == "BOTTOM" then
-            tex:SetPoint(edge .. "LEFT")
-            tex:SetPoint(edge .. "RIGHT")
-            tex:SetHeight(OUTLINE_TH)
-        else
-            tex:SetPoint("TOP" .. edge)
-            tex:SetPoint("BOTTOM" .. edge)
-            tex:SetWidth(OUTLINE_TH)
-        end
-        overlay.edges[edge] = tex
-    end
-
-    overlay.arrows = {}
+    overlay.wings = {}
     for _, side in ipairs({ "left", "right" }) do
-        local tex = overlay:CreateTexture(nil, "OVERLAY")
+        local wing = CreateFrame("Frame", nil, overlay)
+        local tex = wing:CreateTexture(nil, "OVERLAY")
+        tex:SetAllPoints()
         SetArrowArt(tex, side)
-        overlay.arrows[side] = tex
+
+        local bob = wing:CreateAnimationGroup()
+        bob:SetLooping("BOUNCE")
+        local move = bob:CreateAnimation("Translation")
+        move:SetDuration(BOB_SECONDS)
+        move:SetOffset(side == "left" and -BOB_PX or BOB_PX, 0)
+        move:SetSmoothing("IN_OUT")
+        wing.bob = bob
+
+        overlay.wings[side] = wing
     end
     -- Outside the row on both sides: the row itself is already full of text,
     -- and this is the empty margin the nameplate arrows would use.
-    overlay.arrows.left:SetPoint("RIGHT", overlay, "LEFT", -ARROW_GAP, 0)
-    overlay.arrows.right:SetPoint("LEFT", overlay, "RIGHT", ARROW_GAP, 0)
+    overlay.wings.left:SetPoint("RIGHT", overlay, "LEFT", -ARROW_GAP, 0)
+    overlay.wings.right:SetPoint("LEFT", overlay, "RIGHT", ARROW_GAP, 0)
 
     local pulse = overlay:CreateAnimationGroup()
     pulse:SetLooping("BOUNCE")
@@ -644,87 +697,100 @@ local function EnsureOverlay(frame)
     return overlay
 end
 
-local function StartOverlay(frame, arrows, pulsing)
-    local overlay = EnsureOverlay(frame)
-    for _, tex in pairs(overlay.edges) do tex:SetShown(not arrows) end
-    -- Arrows are square and track the row's height, which changes with the
+local function StartWings(frame, motion)
+    local overlay = EnsureWings(frame)
+    -- Wings are square and track the row's height, which changes with the
     -- window's scale, so size them at start rather than once at creation.
     local height = math.max(8, math.floor(frame:GetHeight() + 0.5))
-    for _, tex in pairs(overlay.arrows) do
-        tex:SetShown(arrows)
-        tex:SetSize(ARROW_W, height)
+    for _, wing in pairs(overlay.wings) do
+        wing:SetSize(ARROW_W, height)
+        wing.bob:Stop()
+        if motion == "bob" then wing.bob:Play() end
     end
     overlay.pulse:Stop()
     overlay:SetAlpha(1)
     overlay:Show()
-    if pulsing then overlay.pulse:Play() end
+    if motion == "pulse" then overlay.pulse:Play() end
 end
 
-local function StopOverlay(frame)
+local function StopWings(frame)
     local overlay = frame.wdwHighlight
     if not overlay then return end
     overlay.pulse:Stop()
+    for _, wing in pairs(overlay.wings) do wing.bob:Stop() end
     overlay:Hide()
+end
+
+-- Spinning dots are spaced around the row's perimeter, so a fixed count that
+-- looks right at 220px reads as a handful of lonely specks at 500px. Count and
+-- dash length come from the perimeter instead, and the effect is restarted
+-- once the window has settled at a new width.
+local SPIN_SPACING = 26
+local SPIN_MIN_N, SPIN_MAX_N = 8, 40
+
+local function StartSpin(frame, period, thickness, lengthRatio)
+    local width, height = frame:GetSize()
+    local perimeter = 2 * (width + height)
+    local n = math.floor(perimeter / SPIN_SPACING + 0.5)
+    n = math.max(SPIN_MIN_N, math.min(SPIN_MAX_N, n))
+    local length = math.max(3, math.floor(perimeter / n * lengthRatio + 0.5))
+    LCG.PixelGlow_Start(frame, nil, n, 1 / period, length, thickness,
+        nil, nil, nil, nil, 4)
 end
 
 -- The row highlight ("some of these are missing") as a set of named looks, so
 -- the effect is a setting rather than a hard-coded call. Each entry starts and
--- stops exactly one LibCustomGlow effect; the frame remembers which style is
--- running so changing the setting restarts it in place instead of leaving the
--- old animation attached.
+-- stops exactly one effect; the frame remembers which style is running so
+-- changing the setting restarts it in place instead of leaving the old
+-- animation attached.
 local HIGHLIGHT_STYLES = {
     spinFast = {
         label = "Spinning (fast)",
-        Start = function(r)
-            LCG.PixelGlow_Start(r, nil, 16, nil, 3, nil, nil, nil, nil, nil, 4)
-        end,
+        Start = function(r) StartSpin(r, 4, 1, 0.35) end,
         Stop = function(r) LCG.PixelGlow_Stop(r) end,
     },
     spinSlow = {
+        -- Longer and thicker than the fast one. LibCustomGlow snaps every dash
+        -- to whole pixels, and at a slow crawl a 3x1 speck stepping one pixel
+        -- at a time is what reads as a low frame rate -- the update itself is
+        -- already per-frame. A fatter dash makes each step a smaller fraction
+        -- of the thing that is moving, so the same crawl looks smooth.
         label = "Spinning (slow)",
-        Start = function(r)
-            LCG.PixelGlow_Start(r, nil, 16, 0.1, 3, nil, nil, nil, nil, nil, 4)
-        end,
+        Start = function(r) StartSpin(r, 8, 2, 0.6) end,
         Stop = function(r) LCG.PixelGlow_Stop(r) end,
-    },
-    dashes = {
-        label = "Marching dashes",
-        Start = function(r)
-            LCG.PixelGlow_Start(r, nil, 6, 0.15, 10, 2, nil, nil, nil, nil, 4)
-        end,
-        Stop = function(r) LCG.PixelGlow_Stop(r) end,
-    },
-    sparkle = {
-        label = "Sparkles",
-        Start = function(r)
-            LCG.AutoCastGlow_Start(r, nil, 4, nil, 1, nil, nil, nil, 4)
-        end,
-        Stop = function(r) LCG.AutoCastGlow_Stop(r) end,
     },
     flash = {
+        -- Frame level 0 puts the glow at the row's own level, which is under
+        -- the status bar child that carries the name and the percentage, so it
+        -- halos the row instead of washing out what the row says.
         label = "Pulsing glow",
-        Start = function(r) LCG.ButtonGlow_Start(r, nil, 0.35, 4) end,
+        Start = function(r) LCG.ButtonGlow_Start(r, nil, 0.35, 0) end,
         Stop = function(r) LCG.ButtonGlow_Stop(r) end,
     },
     outline = {
         label = "Solid outline",
-        Start = function(r) StartOverlay(r, false, false) end,
-        Stop = StopOverlay,
+        Start = function(r) StartPlate(r, false) end,
+        Stop = StopPlate,
     },
     outlinePulse = {
         label = "Pulsing outline",
-        Start = function(r) StartOverlay(r, false, true) end,
-        Stop = StopOverlay,
+        Start = function(r) StartPlate(r, true) end,
+        Stop = StopPlate,
     },
     arrows = {
-        label = "Threat arrows",
-        Start = function(r) StartOverlay(r, true, false) end,
-        Stop = StopOverlay,
+        label = "Wings",
+        Start = function(r) StartWings(r, nil) end,
+        Stop = StopWings,
     },
     arrowsPulse = {
-        label = "Threat arrows (pulsing)",
-        Start = function(r) StartOverlay(r, true, true) end,
-        Stop = StopOverlay,
+        label = "Pulsing wings",
+        Start = function(r) StartWings(r, "pulse") end,
+        Stop = StopWings,
+    },
+    arrowsBob = {
+        label = "Bobbing wings",
+        Start = function(r) StartWings(r, "bob") end,
+        Stop = StopWings,
     },
     none = {
         label = "None",
@@ -733,8 +799,8 @@ local HIGHLIGHT_STYLES = {
     },
 }
 local HIGHLIGHT_STYLE_ORDER = {
-    "spinFast", "spinSlow", "dashes", "sparkle", "flash",
-    "outline", "outlinePulse", "arrows", "arrowsPulse", "none",
+    "spinFast", "spinSlow", "flash", "outline", "outlinePulse",
+    "arrows", "arrowsPulse", "arrowsBob", "none",
 }
 
 function WhoDoesWhat:GetStatusBarHighlightStyles()
@@ -760,8 +826,34 @@ function WhoDoesWhat:ApplyStatusBarHighlight(frame, shown, styleKey)
     end
 end
 
+-- Every style is sized for the row it sits on at the moment it starts, so a
+-- drag that is still moving would have to tear them all down and build them
+-- again each frame. They go away for the length of the drag instead and come
+-- back once the width has settled. `glowWanted` is what the last repaint asked
+-- for, kept so the resume knows which rows to light again.
+local highlightsSuspended = false
+
 local function SetRowGlow(row, shown)
-    WhoDoesWhat:ApplyStatusBarHighlight(row, shown)
+    row.glowWanted = shown or nil
+    WhoDoesWhat:ApplyStatusBarHighlight(row, shown and not highlightsSuspended)
+end
+
+local function RefreshRowGlows()
+    if not view then return end
+    local function apply(row)
+        WhoDoesWhat:ApplyStatusBarHighlight(row, false)
+        if row.glowWanted and not highlightsSuspended then
+            WhoDoesWhat:ApplyStatusBarHighlight(row, true)
+        end
+    end
+    for _, row in ipairs(view.rows or {}) do apply(row) end
+    for _, row in pairs(view.stateRows or {}) do apply(row) end
+end
+
+local function SuspendRowGlows(suspend)
+    if highlightsSuspended == suspend then return end
+    highlightsSuspended = suspend
+    RefreshRowGlows()
 end
 
 -- ---------------------------------------------------------------------------
@@ -1659,6 +1751,9 @@ local function EnsureView()
         WhoDoesWhat.db.profile.settings.overviewWidth = view:GetWidth()
         SavePosition()
         LoadPosition()
+        -- Last, so the styles are rebuilt against the width the window ended
+        -- on rather than the one it passed through on the way there.
+        SuspendRowGlows(false)
     end
     handle:SetScript("OnMouseDown", function(self, button)
         if button ~= "LeftButton" or not IsAltKeyDown() then return end
@@ -1704,6 +1799,14 @@ local function EnsureView()
         for _, row in pairs(self.stateRows) do
             row:SetWidth(rowW)
             if row:IsShown() then LayoutStateRow(row) end
+        end
+        if self.resizing then
+            -- Mid-drag: park them until the width stops moving.
+            SuspendRowGlows(true)
+        else
+            -- Any other width change (the settings slider, a profile load)
+            -- lands here already settled, so rebuild at the new size.
+            RefreshRowGlows()
         end
     end)
 
