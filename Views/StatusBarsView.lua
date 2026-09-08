@@ -181,6 +181,63 @@ local function AnnounceName(name)
     return (strsplit("-", name))
 end
 
+-- A pet cannot read a whisper; its owner can, and the owner is who feeds or
+-- buffs it either way.
+local function WhisperTarget(entry)
+    if entry.isPet then
+        local owner = entry.name:match("^(.-)'s Pet$")
+        if owner then return owner end
+    end
+    return entry.name
+end
+
+-- Somebody there is to whisper: not a fake raider (nobody is behind the name)
+-- and not the local player (you already know).
+local function CanWhisper(name)
+    if not name or name == UnitName("player") then return false end
+    local member = WhoDoesWhat.Assign.FindMember(name)
+    return not (member and member.isFake)
+end
+
+-- Who to lean on about this check: the class it requires, narrowed to the ones
+-- actually best placed to fix it. Named in the raid announce and whispered by
+-- Shift-Left-Click, so both say the same thing about whose job this is.
+--
+-- Two narrowings, both the difference between a useful nudge and an annoying
+-- one. A provider the scan says cannot cast it at all (a shadow priest who
+-- never took Divine Spirit) is dropped outright. Then, where the buff has an
+-- improvement talent, only the highest rank anybody here actually carries is
+-- kept -- asking the rank-0 priest to re-cast over the rank-2 one's Fortitude
+-- is asking for the wrong buff.
+--
+-- Unscanned ranks sort as -1, below every real rank, so they are used only when
+-- nothing better is known about anybody; a check with no talent at all leaves
+-- every provider tied, which whispers the whole class.
+--
+-- Nobody is filtered for being unreachable here: the announce names the raid's
+-- providers whoever they are, yourself included, and it is the whisper that
+-- then drops the ones there is no point sending to.
+local function SuppliersForCheck(key, definition, options)
+    local className = options.requiredClass or definition.className
+    if not className or definition.selfSupplied then return {} end
+    local best, candidates = nil, {}
+    for _, name in ipairs(WhoDoesWhat.Assign.MembersOfClass(className)) do
+        local rank = WhoDoesWhat:GetCoreBuffTalentSpecs(name, key)
+        -- `false` is "scanned, and this spec cannot cast it".
+        if rank ~= false then
+            local value = type(rank) == "number" and rank or -1
+            candidates[#candidates + 1] = { name = name, rank = value }
+            if best == nil or value > best then best = value end
+        end
+    end
+    local out = {}
+    for _, candidate in ipairs(candidates) do
+        if candidate.rank == best then out[#out + 1] = candidate.name end
+    end
+    table.sort(out)
+    return out
+end
+
 -- nil when there is nobody left to name. A finished bar is never announced at
 -- all (see canAnnounce), and inside a combined paladin bar a paladin who is
 -- done has no line of their own.
@@ -204,9 +261,21 @@ local function AnnounceLine(prefix, names)
     return prefix .. body
 end
 
--- "[18/25] Hewmongus (Might, Wisdom): x, y, z". Which blessing each raider is
--- missing is deliberately left out -- the paladin knows their own assignment,
--- and naming it per raider turns one line into five.
+-- How many are still short, as a fraction and a percentage of the whole check.
+-- The raid wants the size of the problem; a roll call of two dozen names in
+-- raid chat is a wall nobody reads, so the names only appear while there are
+-- few enough to be a list rather than a wall.
+local MAX_NAMED_MISSING = 5
+
+local function MissingSummary(label, missing, total)
+    local percent = total > 0 and math.floor(missing * 100 / total + 0.5) or 0
+    return string.format("%s -- %d/%d missing (%d%%)", label, missing, total,
+        percent)
+end
+
+-- "Hewmongus (Might, Wisdom) -- 7/25 missing (28%)". Which blessing each raider
+-- is missing is deliberately left out -- the paladin knows their own
+-- assignment, and naming it per raider turns one line into five.
 local function AnnouncePaladinLine(paladin, coverage)
     local blessings = {}
     for _, buff in ipairs(paladin.buffs or {}) do
@@ -225,8 +294,10 @@ local function AnnouncePaladinLine(paladin, coverage)
     if #blessings > 0 then
         label = label .. " (" .. table.concat(blessings, ", ") .. ")"
     end
-    return AnnounceLine(string.format("[%d/%d] %s: ",
-        coverage.correct, coverage.total, label), names)
+    local summary = MissingSummary(label, coverage.total - coverage.correct,
+        coverage.total)
+    if #names == 0 or #names > MAX_NAMED_MISSING then return summary end
+    return AnnounceLine(summary .. ": ", names)
 end
 
 -- Recomputed at click time rather than read off the painted row: a combined
@@ -258,9 +329,32 @@ local function AnnounceLines(row)
         for _, entry in ipairs(row.flagged or {}) do
             names[#names + 1] = entry.name
         end
-        lines[1] = AnnounceLine(string.format("[%d/%d] %s: ",
-            row.correct or 0, row.total or 0,
-            definition and definition.name or row.buffKey), names)
+        -- Nothing missing, nothing to say: a finished check announced itself as
+        -- "0 missing" only because the summary always has a number to print,
+        -- where the old name list simply came out empty and sent nothing.
+        if #names == 0 then return lines end
+        local line = MissingSummary(definition and definition.name
+            or row.buffKey, #names, row.total or 0)
+        if #names <= MAX_NAMED_MISSING then
+            line = AnnounceLine(line .. ": ", names)
+        end
+        -- Who can fix it, on the same line: a count nobody owns is a
+        -- complaint, and the raid should not have to work out whose job it is.
+        if definition then
+            local options = WhoDoesWhat:GetStatusBarCheckOptions(row.buffKey)
+            local suppliers = SuppliersForCheck(row.buffKey, definition, options)
+            if #suppliers > 0 then
+                local className = options.requiredClass or definition.className
+                local shown = {}
+                for _, name in ipairs(suppliers) do
+                    shown[#shown + 1] = AnnounceName(name)
+                end
+                line = line .. " -- " .. className
+                    .. (#shown > 1 and "s: " or ": ")
+                    .. table.concat(shown, ", ")
+            end
+        end
+        lines[1] = line
     end
     return lines
 end
@@ -290,6 +384,91 @@ local function AnnounceRow(row)
     SendAnnounce(AnnounceLines(row))
 end
 
+-- ---------------------------------------------------------------------------
+-- Whisper (Shift-Left-Click a row)
+-- ---------------------------------------------------------------------------
+
+-- What one row's whisper says, as MassWhisper entries.
+--
+-- Three shapes, because three different people can fix a row. A paladin row
+-- reuses the Paladin Buffs section's own message verbatim, so a paladin hears
+-- the same words whichever window nudged them. A self-supplied check (food)
+-- has no provider to lean on, so everyone still missing it hears about it. And
+-- everything else goes to the class that supplies it, carrying the same list
+-- the raid announce would have carried.
+local function RowWhispers(row)
+    local Assign = WhoDoesWhat.Assign
+    if row.isPaladinRow then
+        local all = Assign.CollectPaladinBuffWhispers()
+        if not row.paladinName then return all end
+        local out = {}
+        for _, entry in ipairs(all) do
+            if entry.name == row.paladinName then out[#out + 1] = entry end
+        end
+        return out
+    end
+    if not row.buffKey then return {} end
+    local definition = WhoDoesWhat.StatusBarChecks[row.buffKey]
+    if not definition then return {} end
+    local options = WhoDoesWhat:GetStatusBarCheckOptions(row.buffKey)
+
+    local missing, seen = {}, {}
+    for _, entry in ipairs(row.flagged or {}) do
+        local name = WhisperTarget(entry)
+        if not seen[name] then
+            seen[name] = true
+            missing[#missing + 1] = name
+        end
+    end
+    if #missing == 0 then return {} end
+
+    local out = {}
+    if definition.selfSupplied then
+        for _, name in ipairs(missing) do
+            if CanWhisper(name) then
+                out[#out + 1] = { name = name, bare = true,
+                    msg = "Check your " .. definition.name .. "!" }
+            end
+        end
+        return out
+    end
+    -- The full list here, not the announce's summary: this is one person's own
+    -- to-do rather than a headline, and AnnounceLine keeps it inside what a
+    -- chat message can carry.
+    local msg = AnnounceLine(definition.name .. " -- " .. #missing
+        .. " missing: ", missing)
+    for _, name in ipairs(SuppliersForCheck(row.buffKey, definition, options)) do
+        if CanWhisper(name) then
+            out[#out + 1] = { name = name, bare = true, msg = msg }
+        end
+    end
+    return out
+end
+
+local function WhisperRow(row)
+    if not row or not row.canAnnounce then return end
+    local whispers = RowWhispers(row)
+    if #whispers == 0 then return end
+    WhoDoesWhat.Assign.MassWhisper(whispers)
+end
+
+-- Who the whisper is going to, for the row's own tooltip: nobody should have
+-- to press it to find out whether it reaches the priests or the people
+-- standing there unfed.
+local function WhisperLabel(row)
+    if row.isPaladinRow then
+        return row.paladinName and ("Whisper "
+            .. WhoDoesWhat:DisplayName(row.paladinName, true))
+            or "Whisper Paladins"
+    end
+    local definition = row.buffKey and WhoDoesWhat.StatusBarChecks[row.buffKey]
+    if not definition then return "Whisper" end
+    if definition.selfSupplied then return "Whisper Missing" end
+    local options = WhoDoesWhat:GetStatusBarCheckOptions(row.buffKey)
+    local className = options.requiredClass or definition.className
+    return className and ("Whisper " .. className .. "s") or "Whisper"
+end
+
 -- Modified clicks anywhere in the window are shortcuts to the buff views;
 -- plain clicks stay with the rows themselves (the PallyPower row opens the
 -- diff view). A row carries the check it draws (optionsKey), which is what
@@ -301,9 +480,12 @@ end
 -- header percentage it went with: "tell the raid about every check at once" is
 -- a wall of text nobody asked twice for, and it sat on the shortcut a window
 -- wants for its own settings.
+--
+-- Over a row the shift pair is the two ways to chase a buff -- quietly to the
+-- people who can fix it, or out loud to the raid.
 local function StatusBarsClick(self, button)
+    local key = self and self.optionsKey
     if button == "RightButton" then
-        local key = self and self.optionsKey
         if IsAltKeyDown() then
             if key then WhoDoesWhat:OpenBuffTrackingOptions(key) end
         elseif IsShiftKeyDown() then
@@ -314,21 +496,24 @@ local function StatusBarsClick(self, button)
             end
         end
     elseif button == "LeftButton" and IsShiftKeyDown() then
-        WhoDoesWhat:OpenBuffingGridView()
+        if key then
+            WhisperRow(self)
+        else
+            WhoDoesWhat:OpenBuffingGridView()
+        end
     end
 end
 
--- Same double-line shortcut layout the minimap button uses. Only the title
--- strip carries these now; the bars keep their tooltips to their own status.
+-- Same double-line shortcut layout the minimap button uses, grouped by
+-- modifier: Alt does things to the window, Shift does things with what is in
+-- it. The row shortcuts used to be listed here too, which meant reading four
+-- lines about rows to find the two about the thing under the cursor -- they
+-- live on the rows' own tooltips now, where they apply.
 local function AddShortcutTooltipLines()
+    GameTooltip:AddLine(" ")
     GameTooltip:AddDoubleLine("Shift-Left-Click:", "Buffing Grid",
         1, 0.82, 0, 1, 1, 1)
     GameTooltip:AddDoubleLine("Shift-Right-Click:", "Settings",
-        1, 0.82, 0, 1, 1, 1)
-    GameTooltip:AddLine(" ")
-    GameTooltip:AddDoubleLine("Alt-Right-Click Row:", "Edit",
-        1, 0.82, 0, 1, 1, 1)
-    GameTooltip:AddDoubleLine("Shift-Right-Click Row:", "Announce",
         1, 0.82, 0, 1, 1, 1)
 end
 
@@ -985,13 +1170,19 @@ local function ShowRowTooltip(frame)
         GameTooltip:SetPoint("TOPRIGHT", frame, "TOPLEFT", -6, 0)
     end
     frame:FillTooltip()
-    -- Every row that knows which check it draws can be edited from here, so
-    -- the hint rides along after each row's own content.
+    -- Every row that knows which check it draws carries the shortcuts that act
+    -- on it, after its own content and grouped by modifier like the window's:
+    -- Alt moves or configures, Shift chases the buff.
     if frame.optionsKey then
         GameTooltip:AddLine(" ")
-        GameTooltip:AddDoubleLine("Alt-Right-Click:", "Edit",
+        GameTooltip:AddDoubleLine("Alt-Drag:", "Move",
+            1, 0.82, 0, 1, 1, 1)
+        GameTooltip:AddDoubleLine("Alt-Right-Click:", "Settings",
             1, 0.82, 0, 1, 1, 1)
         if frame.canAnnounce then
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddDoubleLine("Shift-Left-Click:", WhisperLabel(frame),
+                1, 0.82, 0, 1, 1, 1)
             GameTooltip:AddDoubleLine("Shift-Right-Click:", "Announce",
                 1, 0.82, 0, 1, 1, 1)
         end
@@ -1380,6 +1571,7 @@ local function EnsureView()
         -- this is the one place it can say whose it is.
         GameTooltip:SetText("|T" .. WhoDoesWhat.ADDON_ICON .. ":16:16:0:0|t "
             .. "WhoDoesWhat Status Bars", 1, 1, 1)
+        GameTooltip:AddLine(" ")
         GameTooltip:AddDoubleLine("Alt-Drag:", "Move",
             1, 0.82, 0, 1, 1, 1)
         GameTooltip:AddDoubleLine("Alt-Drag-Edge:", "Resize",
