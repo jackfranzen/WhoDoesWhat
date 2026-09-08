@@ -20,7 +20,7 @@ WhoDoesWhat.Classes = {
         },
         roles = {
             { name = "Fury", icon = 132347, id = "warrior_fury", wowRole = "dps" },
-            { name = "Arms", icon = 132333, id = "warrior_arms", wowRole = "dps" },
+            { name = "Arms", icon = 132355, id = "warrior_arms", wowRole = "dps" },  -- Ability_Warrior_SavageBlow (Mortal Strike)
             { name = "Tank", icon = 132341, id = "warrior_prot", wowRole = "tank" }
         },
         categories = {
@@ -111,7 +111,7 @@ WhoDoesWhat.Classes = {
         },
         roles = {
             { name = "Elemental", icon = 136048, id = "shaman_ele", wowRole = "dps" },    -- Spell_Nature_Lightning
-            { name = "Enhancement", icon = 136051, id = "shaman_enh", wowRole = "dps" },  -- Spell_Nature_LightningShield
+            { name = "Enhancement", icon = 132314, id = "shaman_enh", wowRole = "dps" },  -- Ability_Shaman_Stormstrike
             { name = "Restoration", icon = 136043, id = "shaman_resto", wowRole = "healer" } -- Spell_Nature_HealingWaveGreater
         }
     },
@@ -179,7 +179,7 @@ for _, classInfo in ipairs(WhoDoesWhat.Classes) do
     if classInfo.name == "Paladin" then
         classInfo.roles[1].name = "Main Tank"
         table.insert(classInfo.roles, 2,
-            { name = "Threat Tank", icon = 136051, id = "paladin_prot_trash", wowRole = "tank" })
+            { name = "Threat Tank", icon = 135911, id = "paladin_prot_trash", wowRole = "tank" })  -- Spell_Holy_GreaterBlessingofSanctuary
     elseif not features.isClassicEra then
         if classInfo.name == "Hunter" then
             table.insert(classInfo.roles,
@@ -238,8 +238,8 @@ WhoDoesWhat.PaladinBuffs = {
         normalSpellId = 27142 -- Blessing of Wisdom (Rank 6)
     },
     sanctuary = {
-        icon = "Interface\\Icons\\Spell_Nature_LightningShield",
-        iconId = 136051,
+        icon = "Interface\\Icons\\Spell_Holy_GreaterBlessingofSanctuary",
+        iconId = 135911,
         name_short = "Sanc",
         name_long = "Sanctuary",
         spellId = 27169, -- Greater Blessing of Sanctuary (Rank 2)
