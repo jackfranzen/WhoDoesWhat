@@ -137,8 +137,26 @@ local function ComparisonMembers(diffs)
             }
         end
     end
+    -- Same ordering as the buff grid: class > pets after Warriors > role >
+    -- name. Rows kept for targets who have left the group carry no class
+    -- metadata, so they fall to the bottom.
     table.sort(members, function(a, b)
-        return a.displayName:lower() < b.displayName:lower()
+        local classA = a.isPet and "Warrior" or (a.classInfo and a.classInfo.name)
+        local classB = b.isPet and "Warrior" or (b.classInfo and b.classInfo.name)
+        if classA ~= classB then
+            if not classA then return false end
+            if not classB then return true end
+            return classA < classB
+        end
+        -- Real Warriors first, then the pet section beneath them.
+        if (a.isPet or false) ~= (b.isPet or false) then
+            return not a.isPet
+        end
+        -- Within a class, group by assigned role (tank/heal/dps clump together).
+        local ra = WhoDoesWhat:RoleSortRank(a.planName)
+        local rb = WhoDoesWhat:RoleSortRank(b.planName)
+        if ra ~= rb then return ra < rb end
+        return a.planName < b.planName
     end)
     return members
 end
