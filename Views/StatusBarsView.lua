@@ -1539,19 +1539,16 @@ local function ApplyResizeBounds()
     end
 end
 
--- The strip is TITLE_H tall, so the badge has to fit inside that with room to
--- breathe rather than setting the height itself.
-local TITLE_ICON = TITLE_H - 2
-
 local function LayoutHeader()
-    -- Centred and badged: with the coverage percentage gone the strip carries
-    -- one thing, and a lone label hugging the left edge of a window this narrow
-    -- read as an afterthought. The name shortens before the badge does -- the
-    -- icon is what says whose window this is at a glance.
+    -- Centred: with the coverage percentage gone the strip carries one thing,
+    -- and a lone label hugging the left edge of a window this narrow read as an
+    -- afterthought. No addon badge in front of it -- at the TITLE_H this strip
+    -- is, an icon small enough to fit was too small to read, and the strip
+    -- growing to suit one is not a trade worth making. The tooltip signs the
+    -- window instead.
     view.titleText:Show()
-    view.titleText:SetText("|T" .. WhoDoesWhat.ADDON_ICON .. ":"
-        .. TITLE_ICON .. ":" .. TITLE_ICON .. ":0:0|t "
-        .. (view:GetWidth() < ULTRA_COMPACT_W and "Status" or "WDW Status"))
+    view.titleText:SetText(view:GetWidth() < ULTRA_COMPACT_W
+        and "Status" or "WDW Status")
     view.titleText:ClearAllPoints()
     view.titleText:SetPoint("CENTER", 0, 0)
 end
