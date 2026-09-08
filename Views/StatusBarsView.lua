@@ -452,22 +452,6 @@ local function WhisperRow(row)
     WhoDoesWhat.Assign.MassWhisper(whispers)
 end
 
--- Who the whisper is going to, for the row's own tooltip: nobody should have
--- to press it to find out whether it reaches the priests or the people
--- standing there unfed.
-local function WhisperLabel(row)
-    if row.isPaladinRow then
-        return row.paladinName and ("Whisper "
-            .. WhoDoesWhat:DisplayName(row.paladinName, true))
-            or "Whisper Paladins"
-    end
-    local definition = row.buffKey and WhoDoesWhat.StatusBarChecks[row.buffKey]
-    if not definition then return "Whisper" end
-    if definition.selfSupplied then return "Whisper Missing" end
-    local options = WhoDoesWhat:GetStatusBarCheckOptions(row.buffKey)
-    local className = options.requiredClass or definition.className
-    return className and ("Whisper " .. className .. "s") or "Whisper"
-end
 
 -- Modified clicks anywhere in the window are shortcuts to the buff views;
 -- plain clicks stay with the rows themselves (the PallyPower row opens the
@@ -1156,6 +1140,44 @@ local function TooltipAnchor()
     return TOOLTIP_ANCHORS[saved] and saved or "LEFT"
 end
 
+-- Who the whisper is going to, for the row's own tooltip: nobody should have to
+-- press it to find out whether it reaches the priests or the people standing
+-- there unfed. One recipient is named outright, in their class colour like
+-- every other name WDW prints -- "Whisper Buffers" is only worth saying when
+-- there is more than one of them to name.
+--
+-- nil when there is nobody to send to, so the row doesn't offer a shortcut
+-- that would do nothing. Cheap on purpose: an open tooltip is rebuilt on every
+-- repaint, which rides the buff-tracking notify.
+local function WhisperName(name)
+    local member = WhoDoesWhat.Assign.FindMember(name)
+    return ColoredName(name, member and member.classInfo)
+end
+
+local function WhisperLabel(row)
+    if row.isPaladinRow then
+        if row.paladinName then
+            return "Whisper " .. WhisperName(row.paladinName)
+        end
+        return "Whisper Buffers"
+    end
+    local definition = row.buffKey and WhoDoesWhat.StatusBarChecks[row.buffKey]
+    if not definition then return nil end
+    -- Nobody casts food for you, so the nudge goes to everyone still without
+    -- it rather than to a provider there isn't one of.
+    if definition.selfSupplied then
+        return #(row.flagged or {}) > 0 and "Whisper All" or nil
+    end
+    local options = WhoDoesWhat:GetStatusBarCheckOptions(row.buffKey)
+    local targets = {}
+    for _, name in ipairs(SuppliersForCheck(row.buffKey, definition, options)) do
+        if CanWhisper(name) then targets[#targets + 1] = name end
+    end
+    if #targets == 0 then return nil end
+    if #targets == 1 then return "Whisper " .. WhisperName(targets[1]) end
+    return "Whisper Buffers"
+end
+
 local function ShowRowTooltip(frame)
     GameTooltip:SetOwner(frame, "ANCHOR_NONE")
     GameTooltip:ClearAllPoints()
@@ -1181,8 +1203,11 @@ local function ShowRowTooltip(frame)
             1, 0.82, 0, 1, 1, 1)
         if frame.canAnnounce then
             GameTooltip:AddLine(" ")
-            GameTooltip:AddDoubleLine("Shift-Left-Click:", WhisperLabel(frame),
-                1, 0.82, 0, 1, 1, 1)
+            local whisper = WhisperLabel(frame)
+            if whisper then
+                GameTooltip:AddDoubleLine("Shift-Left-Click:", whisper,
+                    1, 0.82, 0, 1, 1, 1)
+            end
             GameTooltip:AddDoubleLine("Shift-Right-Click:", "Announce",
                 1, 0.82, 0, 1, 1, 1)
         end
