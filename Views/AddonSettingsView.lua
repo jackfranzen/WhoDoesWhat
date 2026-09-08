@@ -645,6 +645,21 @@ local function CancelActiveColorPicker()
     end
 end
 
+-- A picker dismissed with OK, or closed by anything other than its own Cancel
+-- button, leaves its cancel handler behind. The next picker to open starts by
+-- running whatever handler is still pending, which would undo the edit that was
+-- just accepted -- so the handler is dropped the moment the frame goes away.
+local function EnsureColorPickerHook()
+    if ColorPickerFrame.wdwStatusPreviewHooked then return end
+    ColorPickerFrame:HookScript("OnHide", function()
+        activeColorPickerCancel = nil
+        if not WhoDoesWhat.statusBarColorPreviewKey then return end
+        WhoDoesWhat.statusBarColorPreviewKey = nil
+        WhoDoesWhat:RefreshStatusBarsView()
+    end)
+    ColorPickerFrame.wdwStatusPreviewHooked = true
+end
+
 local function OpenBarColorPicker(owner, f)
     CancelActiveColorPicker()
     local key = f.buffKey
@@ -670,15 +685,7 @@ local function OpenBarColorPicker(owner, f)
         RefreshBuffOptionsFrame()
     end
 
-    if not ColorPickerFrame.wdwStatusPreviewHooked then
-        ColorPickerFrame:HookScript("OnHide", function()
-            activeColorPickerCancel = nil
-            if not WhoDoesWhat.statusBarColorPreviewKey then return end
-            WhoDoesWhat.statusBarColorPreviewKey = nil
-            WhoDoesWhat:RefreshStatusBarsView()
-        end)
-        ColorPickerFrame.wdwStatusPreviewHooked = true
-    end
+    EnsureColorPickerHook()
     ColorPickerFrame:SetFrameStrata("FULLSCREEN_DIALOG")
     ColorPickerFrame:SetFrameLevel(f:GetFrameLevel() + 10)
     ColorPickerFrame:SetClampedToScreen(true)
@@ -1415,7 +1422,8 @@ local function EnsureSettingsFrame()
     local highlightDD = CreateFrame("Frame",
         "WhoDoesWhatStatusBarsHighlightDD", statusPage, "UIDropDownMenuTemplate")
     highlightDD:SetPoint("LEFT", highlightLabel, "RIGHT", -6, -2)
-    UIDropDownMenu_SetWidth(highlightDD, 110)
+    -- Wide enough for the longest of the wing styles ("Pulsing wings (right)").
+    UIDropDownMenu_SetWidth(highlightDD, 135)
     WhoDoesWhat:StyleDropdown(highlightDD, true)
 
     local highlightPreview = CreateFrame("Frame", nil, statusPage)
@@ -1521,6 +1529,7 @@ local function EnsureSettingsFrame()
             WhoDoesWhat.db.profile.settings.statusBarHighlightColor = original
             RefreshHighlightColor()
         end
+        EnsureColorPickerHook()
         ColorPickerFrame:SetFrameStrata("FULLSCREEN_DIALOG")
         ColorPickerFrame:SetFrameLevel(statusPage:GetFrameLevel() + 30)
         ColorPickerFrame:SetClampedToScreen(true)

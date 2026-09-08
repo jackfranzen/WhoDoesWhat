@@ -563,7 +563,7 @@ end
 -- your threat. The plate goes *behind* the row rather than on top of it, so it
 -- never sits over the icon or the text, and two highlighted neighbours merge
 -- into one band instead of stacking into a double-width line.
-local OUTLINE_TH = 2
+local OUTLINE_TH = 1
 local ARROW_W = 12
 -- The wings sit in the window's margin, and at the old 2px they read as part
 -- of the row's border rather than as something pointing at it.
@@ -718,13 +718,15 @@ local function EnsureWings(frame)
     return overlay
 end
 
-local function StartWings(frame, motion)
+-- `only` names the single side to show, or is nil for the pair.
+local function StartWings(frame, motion, only)
     local overlay = EnsureWings(frame)
     -- Wings are square and track the row's height, which changes with the
     -- window's scale, so size them at start rather than once at creation.
     local height = math.max(8, math.floor(frame:GetHeight() + 0.5))
     local r, g, b = WhoDoesWhat:GetStatusBarHighlightColor()
-    for _, wing in pairs(overlay.wings) do
+    for side, wing in pairs(overlay.wings) do
+        wing:SetShown(only == nil or only == side)
         wing:SetSize(ARROW_W, height)
         wing.tex:SetVertexColor(r, g, b)
         wing.bob:Stop()
@@ -768,17 +770,16 @@ end
 
 -- LibCustomGlow's button glow is the spell-activation art plus a ring of
 -- marching ants. The ants are the only part of it that keeps moving, so the
--- still version is the same effect with them switched off and the per-frame
--- update dropped. Frame level 0 puts it at the row's own level, under every
--- child frame the row draws its icon and its text on.
+-- still version is the same effect with them hidden. Only hidden, not stopped:
+-- the library installs the script that crawls them when it takes a frame from
+-- its pool and not when it re-uses one already on the row, so clearing it left
+-- a still glow switched to a pulsing one with nothing moving. Frame level 0
+-- puts the whole thing at the row's own level, under every child frame the row
+-- draws its icon and its text on.
 local function StartButtonGlow(frame, animated)
     LCG.ButtonGlow_Start(frame, HighlightColor(), 0.35, 0)
     local glow = frame._ButtonGlow
-    if not glow then return end
-    -- The glow frames come from a pool, so the still variant has to put the
-    -- ants back rather than leave them hidden for whoever gets the frame next.
-    glow.ants:SetShown(animated)
-    if not animated then glow:SetScript("OnUpdate", nil) end
+    if glow then glow.ants:SetShown(animated) end
 end
 
 -- The row highlight ("some of these are missing") as a set of named looks, so
@@ -812,21 +813,6 @@ local HIGHLIGHT_STYLES = {
         Start = function(r) StartPlate(r, true) end,
         Stop = StopPlate,
     },
-    arrows = {
-        label = "Wings",
-        Start = function(r) StartWings(r, nil) end,
-        Stop = StopWings,
-    },
-    arrowsPulse = {
-        label = "Pulsing wings",
-        Start = function(r) StartWings(r, "pulse") end,
-        Stop = StopWings,
-    },
-    arrowsBob = {
-        label = "Bobbing wings",
-        Start = function(r) StartWings(r, "bob") end,
-        Stop = StopWings,
-    },
     none = {
         label = "None",
         Start = function() end,
@@ -835,8 +821,34 @@ local HIGHLIGHT_STYLES = {
 }
 local HIGHLIGHT_STYLE_ORDER = {
     "spin", "glow", "flash", "outline", "outlinePulse",
-    "arrows", "arrowsPulse", "arrowsBob", "none",
 }
+
+-- Nine wing styles is three motions against three choices of which side wears
+-- them, and writing them out is nine near-identical entries. Built instead, in
+-- the order they read in the dropdown: each motion, then that motion on one
+-- side at a time.
+local WING_MOTIONS = {
+    { key = "arrows", label = "Wings" },
+    { key = "arrowsPulse", label = "Pulsing wings", motion = "pulse" },
+    { key = "arrowsBob", label = "Bobbing wings", motion = "bob" },
+}
+local WING_SIDES = {
+    {},
+    { key = "Left", label = " (left)", side = "left" },
+    { key = "Right", label = " (right)", side = "right" },
+}
+for _, kind in ipairs(WING_MOTIONS) do
+    for _, side in ipairs(WING_SIDES) do
+        local key = kind.key .. (side.key or "")
+        HIGHLIGHT_STYLES[key] = {
+            label = kind.label .. (side.label or ""),
+            Start = function(r) StartWings(r, kind.motion, side.side) end,
+            Stop = StopWings,
+        }
+        table.insert(HIGHLIGHT_STYLE_ORDER, key)
+    end
+end
+table.insert(HIGHLIGHT_STYLE_ORDER, "none")
 -- Anything saved under a key that has since been dropped falls back to this.
 local DEFAULT_HIGHLIGHT_STYLE = "spin"
 
@@ -1513,6 +1525,13 @@ local function CreateRow(index)
     iconHost:SetSize(ICON_SIZE, ICON_SIZE)
     iconHost:SetPoint("TOPLEFT", 0, 0)
     row.iconHost = iconHost
+
+    -- The bar half of the row has an opaque background and the icon half did
+    -- not, so anything drawn behind the row showed through around the icon and
+    -- stopped dead at the bar. Same colour, so the row reads as one strip.
+    local iconBg = iconHost:CreateTexture(nil, "BACKGROUND")
+    iconBg:SetAllPoints()
+    iconBg:SetColorTexture(0.025, 0.025, 0.035, 1)
 
     local icon = iconHost:CreateTexture(nil, "ARTWORK")
     icon:SetAllPoints()
