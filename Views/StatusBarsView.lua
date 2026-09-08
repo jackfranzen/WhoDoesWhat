@@ -166,9 +166,14 @@ end
 -- nobody needs read into raid chat, and the useful direction is already the
 -- bar's own colour.
 
+-- Every line WDW says out loud signs itself, the way its whispers already do
+-- (MassWhisper), so a raider reading raid chat knows which addon is talking --
+-- and which one to go and get.
+local ANNOUNCE_PREFIX = "[WhoDoesWhat] "
+
 -- Chat cuts a message at 255 bytes; stop short so the "and N more" tail always
--- survives.
-local ANNOUNCE_BUDGET = 240
+-- survives, and leave the signature room on top of that.
+local ANNOUNCE_BUDGET = 240 - #ANNOUNCE_PREFIX
 -- A burst of SendChatMessage risks the server throttle, so several paladin
 -- lines go out spaced apart. Same value the assignment mass-mail uses.
 local ANNOUNCE_STAGGER = 0.25
@@ -361,15 +366,17 @@ local function SendAnnounce(lines)
     if #lines == 0 then return end
     local channel = IsInRaid() and "RAID" or (IsInGroup() and "PARTY" or nil)
     for i, line in ipairs(lines) do
+        local text = ANNOUNCE_PREFIX .. line
         if not channel then
             -- Solo it has nowhere to go, but seeing it is how you check the
-            -- wording before a raid does.
-            WhoDoesWhat:Print(line)
+            -- wording before a raid does -- signature included, since that is
+            -- part of what the raid would read.
+            WhoDoesWhat:Print(text)
         elseif i == 1 then
-            SendChatMessage(line, channel)
+            SendChatMessage(text, channel)
         else
             C_Timer.After((i - 1) * ANNOUNCE_STAGGER, function()
-                SendChatMessage(line, channel)
+                SendChatMessage(text, channel)
             end)
         end
     end
