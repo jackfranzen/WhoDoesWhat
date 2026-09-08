@@ -522,7 +522,7 @@ local defaults = {
             -- box: it is the view that says what still needs doing, and a fresh
             -- install has no reason to hunt for it in the settings.
             overviewEnabled = true,
-            overviewAnchor = "TOPLEFT",
+            overviewAnchor = "TOPRIGHT",
             overviewDefaultDisplay = "percent",
             -- Which side of a hovered status bar its tooltip opens on
             -- (LEFT / RIGHT / ABOVE / BELOW).
@@ -534,10 +534,12 @@ local defaults = {
             statusBarTooltipNames = 10,
             -- Which animation a status row uses when it highlights
             -- (see HIGHLIGHT_STYLES in StatusBarsView).
-            statusBarHighlightStyle = "spin",
-            -- nil means LibCustomGlow's yellow; the picker writes {r,g,b}.
-            statusBarHighlightColor = nil,
-            overviewWidth = 220,
+            statusBarHighlightStyle = "flash",
+            -- The colour every highlight style is drawn in. The picker writes
+            -- {r,g,b} here; the Status Bars page's Defaults button puts this
+            -- amber back.
+            statusBarHighlightColor = { r = 0.95, g = 0.71, b = 0 },
+            overviewWidth = 140,
             statusBarChecks = {},
         },
     },

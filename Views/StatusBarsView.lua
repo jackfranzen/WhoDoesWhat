@@ -29,7 +29,9 @@ local ICON_SIZE = 18
 local ICON_BG_COLOR = { 0.28, 0.28, 0.3, 1 }
 local BAR_H = 18
 local EMPTY_ICON_SIZE = math.floor(BAR_H * 0.8 + 0.5)
-local DEFAULT_W = 220
+-- Only reached if the setting is missing; the profile default in Core.lua is
+-- the real answer and matches this.
+local DEFAULT_W = 140
 local MIN_W = 90
 local RESIZE_MIN_W = 68
 local HIDE_NAMES_W = 105
@@ -139,7 +141,10 @@ local function LoadPosition()
         p.x, p.y = ClampPosition(p.x, p.y, anchor)
         view:SetPoint(anchor, UIParent, "BOTTOMLEFT", p.x, p.y)
     else
-        view:SetPoint(anchor, UIParent, "CENTER", 0, -80)
+        -- No saved position: dead centre. This is where the Status Bars page's
+        -- Defaults button puts the window, and a fresh install should land in
+        -- the same place that button describes.
+        view:SetPoint(anchor, UIParent, "CENTER", 0, 0)
     end
     settings.overviewScale = nil
 end
@@ -584,7 +589,9 @@ local GLOW_PAD = 1
 -- One colour for every style, so the setting is "what colour is the highlight"
 -- rather than one answer per effect. The default is LibCustomGlow's own yellow,
 -- which is what the spinning styles were already drawn in.
-local DEFAULT_HIGHLIGHT_COLOR = { r = 0.95, g = 0.95, b = 0.32 }
+-- Only reached if the setting is somehow missing -- the profile default in
+-- Core.lua is the real answer, and this is the same amber.
+local DEFAULT_HIGHLIGHT_COLOR = { r = 0.95, g = 0.71, b = 0 }
 
 function WhoDoesWhat:GetStatusBarHighlightColor()
     local c = WhoDoesWhat.db.profile.settings.statusBarHighlightColor
@@ -2324,6 +2331,42 @@ function WhoDoesWhat:SetStatusBarsAnchor(anchor)
     LayoutResizeHandle()
     LoadPosition()
     self:RefreshStatusBarsView()
+end
+
+-- Everything the Status Bars settings page owns. Per-check options are the
+-- Buff Tracking page's and are left alone.
+local RESET_SETTINGS = {
+    "overviewEnabled", "overviewAnchor", "overviewDefaultDisplay",
+    "overviewWidth", "statusBarTooltipAnchor", "statusBarTooltipNames",
+    "statusBarHighlightStyle", "statusBarHighlightColor",
+}
+
+function WhoDoesWhat:ResetStatusBarSettings()
+    local settings = self.db.profile.settings
+    -- Straight from the profile defaults rather than from a second list of
+    -- values here, so the button and a fresh install cannot disagree.
+    local defaults = self.db.defaults and self.db.defaults.profile
+        and self.db.defaults.profile.settings or {}
+    for _, key in ipairs(RESET_SETTINGS) do
+        local value = defaults[key]
+        if type(value) == "table" then
+            local copy = {}
+            for k, v in pairs(value) do copy[k] = v end
+            settings[key] = copy
+        else
+            settings[key] = value
+        end
+    end
+    -- Dropped rather than centred by hand: with no saved position LoadPosition
+    -- puts the window in the middle of the screen, which is the one place the
+    -- button promises.
+    settings.overviewPos = nil
+    if view then
+        view:SetWidth(settings.overviewWidth)
+        LayoutResizeHandle()
+        LoadPosition()
+    end
+    self:UpdateStatusBarsViewVisibility()
 end
 
 function WhoDoesWhat:UpdateStatusBarsViewVisibility()

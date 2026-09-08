@@ -1279,6 +1279,24 @@ local function EnsureSettingsFrame()
     local statusPage = pages[2]
     yL = y0
     yL = AddHeading(statusPage, CONTENT_X, yL, "Status Bars", 0.96, 0.55, 0.73)
+
+    -- On the heading's line, hard right: it undoes this whole page at once, so
+    -- it belongs beside the page's name rather than buried under the last
+    -- option it happens to reset.
+    local resetButton = CreateFrame("Button", nil, statusPage,
+        "UIPanelButtonTemplate")
+    resetButton:SetSize(80, 22)
+    resetButton:SetPoint("TOPRIGHT", statusPage, "TOPRIGHT", -16, -(y0 - 2))
+    resetButton:SetText("Defaults")
+    resetButton:SetScript("OnClick", function()
+        CloseBuffOptions()
+        WhoDoesWhat:ResetStatusBarSettings()
+        f.RefreshStatusPage()
+    end)
+    AddTooltip(resetButton, "Reset Status Bars",
+        "Put every option on this page back to its default and move the"
+            .. " window to the middle of the screen. Per-check options on the"
+            .. " Buff Tracking page are left alone.")
     f.overviewCheck, yL = AddCompactCheckboxRow(statusPage, CONTENT_X, yL,
         "Enable WDW Status Bars UI",
         "Shows a persistent UI element with many bars to see your raid's status at a quick glance.",
@@ -1564,6 +1582,29 @@ local function EnsureSettingsFrame()
             .. " to reset it.")
     AddTooltip(highlightSwatch, "Highlight color",
         "Left-click for the WoW color picker; right-click to reset.")
+
+    -- Every widget on this page, read back out of the settings. Called when the
+    -- window opens and again after the Defaults button has rewritten them.
+    f.RefreshStatusPage = function()
+        local settings = WhoDoesWhat.db.profile.settings
+        f.overviewCheck:SetChecked(settings.overviewEnabled)
+        local anchor = settings.overviewAnchor or "TOPLEFT"
+        UIDropDownMenu_SetText(f.overviewAnchorDD,
+            anchorLabels[anchor] or anchorLabels.TOPLEFT)
+        local display = settings.overviewDefaultDisplay or "percent"
+        UIDropDownMenu_SetText(f.overviewDefaultDisplayDD,
+            STATUS_DISPLAY_LABELS[display] or STATUS_DISPLAY_LABELS.percent)
+        local tooltipAnchor = settings.statusBarTooltipAnchor or "LEFT"
+        UIDropDownMenu_SetText(f.overviewTooltipAnchorDD,
+            STATUS_TOOLTIP_ANCHOR_LABELS[tooltipAnchor]
+                or STATUS_TOOLTIP_ANCHOR_LABELS.LEFT)
+        UIDropDownMenu_SetText(f.overviewTooltipNamesDD,
+            tostring(settings.statusBarTooltipNames or DEFAULT_TOOLTIP_NAMES))
+        local styles = WhoDoesWhat:GetStatusBarHighlightStyles()
+        UIDropDownMenu_SetText(highlightDD, styles[SavedHighlightStyle()].label)
+        -- Paints the swatch and restarts the sample in one go.
+        RefreshHighlightColor()
+    end
 
     yL = yL + 64
 
@@ -2234,29 +2275,7 @@ function WhoDoesWhat:OpenAddonSettingsView(section)
     RefreshRaidFrameOptionStates(f)
     f.announceRoleCheck:SetChecked(settings.announceRoleChanges)
     f.manageBlizzRolesCheck:SetChecked(settings.manageBlizzardRoles ~= false)
-    f.overviewCheck:SetChecked(settings.overviewEnabled)
-    local overviewAnchor = settings.overviewAnchor or "TOPLEFT"
-    UIDropDownMenu_SetText(f.overviewAnchorDD,
-        f.overviewAnchorLabels[overviewAnchor] or f.overviewAnchorLabels.TOPLEFT)
-    local overviewDisplay = settings.overviewDefaultDisplay or "percent"
-    UIDropDownMenu_SetText(f.overviewDefaultDisplayDD,
-        STATUS_DISPLAY_LABELS[overviewDisplay] or STATUS_DISPLAY_LABELS.percent)
-    local tooltipAnchor = settings.statusBarTooltipAnchor or "LEFT"
-    UIDropDownMenu_SetText(f.overviewTooltipAnchorDD,
-        STATUS_TOOLTIP_ANCHOR_LABELS[tooltipAnchor]
-            or STATUS_TOOLTIP_ANCHOR_LABELS.LEFT)
-    UIDropDownMenu_SetText(f.overviewTooltipNamesDD,
-        tostring(settings.statusBarTooltipNames or DEFAULT_TOOLTIP_NAMES))
-    local highlightStyles, _, defaultHighlight =
-        WhoDoesWhat:GetStatusBarHighlightStyles()
-    local highlightStyle = settings.statusBarHighlightStyle
-    if not highlightStyles[highlightStyle] then
-        highlightStyle = defaultHighlight
-    end
-    UIDropDownMenu_SetText(f.overviewHighlightDD,
-        highlightStyles[highlightStyle].label)
-    -- Paints the swatch and restarts the sample in one go.
-    f.RefreshHighlightColor()
+    f.RefreshStatusPage()
     RefreshStatusBuffRows(f)
     f.devModeCheck:SetChecked(settings.developerMode)
     f.showLogsCheck:SetChecked(settings.showLogsButton)
