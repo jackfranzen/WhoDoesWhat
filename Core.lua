@@ -30,6 +30,10 @@ end
 -- yet" hint (UnitMenu). Shared so the two stay visually identical.
 WhoDoesWhat.WARNING_ICON = "Interface\\DialogFrame\\UI-Dialog-Icon-AlertNew"
 
+-- WDW's own icon: the minimap button wears it, and it signs the tooltips that
+-- name the addon outright.
+WhoDoesWhat.ADDON_ICON = "Interface\\AddOns\\WhoDoesWhat\\Media\\Icon.tga"
+
 -- The single letter that stands in for a name in tight spaces (status bar
 -- rows, buff-grid column headers). Names are UTF-8, so an accented first
 -- letter like "Ándraste" is two bytes: a plain :sub(1, 1) would hand the font

@@ -1520,6 +1520,21 @@ function Bridge:OnEnable()
         seenPetNames[ShortName(petName)] = true
     end
 
+    -- PallyPower's master switch fires no event, and its options panel is not
+    -- the only way to reach it, so hook the two methods anything flipping that
+    -- switch has to call -- its own setter does, and so does ours. Without this
+    -- our bar only noticed on the next repaint it happened to get, which solo
+    -- could be the next time you dragged it. Both hooks land on the same
+    -- question, "should this bar be standing down", so the double call our own
+    -- toggle makes is just an answer given twice.
+    if _G.PallyPower and type(_G.PallyPower.OnEnable) == "function" then
+        local function PallyPowerSwitched()
+            WhoDoesWhat:UpdatePaladinBuffingBarVisibility()
+        end
+        hooksecurefunc(_G.PallyPower, "OnEnable", PallyPowerSwitched)
+        hooksecurefunc(_G.PallyPower, "OnDisable", PallyPowerSwitched)
+    end
+
     -- Outgoing side: everything PallyPower sends (whispers included) goes
     -- through the shared ChatThrottleLib singleton. All addons finished
     -- loading before OnEnable, so the winning library revision is final and

@@ -1860,7 +1860,11 @@ local function EnsureBar()
     -- everything else the bar pops out.
     title.tooltipAnchor = bar
     title.FillTooltip = function()
-        GameTooltip:SetText("Paladin Bar", 1, 1, 1)
+        -- Signed with the addon's own icon and full name: the bar sits loose on
+        -- the screen next to whatever else the paladin runs, so its tooltip is
+        -- the one place that can say whose it is.
+        GameTooltip:SetText("|T" .. WhoDoesWhat.ADDON_ICON .. ":16:16:0:0|t "
+            .. "WhoDoesWhat Paladin Bar", 1, 1, 1)
         -- Test mode renders somebody else's jobs, and everything downstream
         -- follows them -- which class buttons appear, and whether the Righteous
         -- Fury button does, since that reads the RENDERED paladin's tank role.

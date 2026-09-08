@@ -243,7 +243,7 @@ local MINIMAP_NAME = "WhoDoesWhat"
 -- else, so the artwork the README shows is not something the game can draw.
 -- 64px for a button rendered at about 17, which leaves it sharp without
 -- shipping the full-size source in the package (see .pkgmeta).
-local MINIMAP_ICON = "Interface\\AddOns\\WhoDoesWhat\\Media\\Icon.tga"
+local MINIMAP_ICON = WhoDoesWhat.ADDON_ICON
 local minimapIcon
 local minimapLoader = CreateFrame("Frame")
 
