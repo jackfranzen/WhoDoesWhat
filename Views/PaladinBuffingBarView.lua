@@ -1879,23 +1879,35 @@ local function EnsureBar()
                     or "nobody"),
                 1, 0.25, 0.25, true)
         end
-        GameTooltip:AddLine(
-            WhoDoesWhat.db.profile.settings.pallyBuffSource == "pallypower"
-                and "Buffing data is powered by PallyPower assignments."
-                or "Buffing data is powered by WDW.",
-            0.6, 0.6, 0.6, true)
-        if WhoDoesWhat:PallyPowerIsEnabled() then
+        -- Where the buffing data comes from is a fact about a bar that is
+        -- drawing something. Stood down it is drawing nothing, so it says that
+        -- instead -- one line, not two contradicting each other.
+        local standingDown = WhoDoesWhat:PallyPowerIsEnabled()
+        if standingDown then
             GameTooltip:AddLine("PallyPower is switched on, so this bar has"
                 .. " stood down to stay out of its way.", 1, 0.25, 0.25, true)
+        else
+            GameTooltip:AddLine(
+                WhoDoesWhat.db.profile.settings.pallyBuffSource == "pallypower"
+                    and "Buffing data is powered by PallyPower assignments."
+                    or "Buffing data is powered by WDW.",
+                0.6, 0.6, 0.6, true)
         end
         GameTooltip:AddLine(" ")
         GameTooltip:AddDoubleLine("Alt-Drag:", "Move",
             1, 0.82, 0, 1, 1, 1)
         -- The switch, and then a gap: it belongs with the move as something
         -- that acts on the bar itself, not with the two that open a window.
+        -- It names the RESULT of the click rather than the mechanism, and
+        -- colours it accordingly, so there is no working out which way the
+        -- switch currently sits before pressing it.
         if WhoDoesWhat:PallyPowerInstalled() then
-            GameTooltip:AddDoubleLine("Alt-Right-Click:", "Toggle PallyPower",
-                1, 0.82, 0, 1, 1, 1)
+            local label, r, g, b = "Disable for PP", 1, 0.3, 0.3
+            if standingDown then
+                label, r, g, b = "Enable WhoDoesWhat", 0.3, 1, 0.3
+            end
+            GameTooltip:AddDoubleLine("Alt-Right-Click:", label,
+                1, 0.82, 0, r, g, b)
             GameTooltip:AddLine(" ")
         end
         GameTooltip:AddDoubleLine("Shift-Left-Click:", "Buffing Grid",
