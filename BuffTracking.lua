@@ -79,6 +79,13 @@ local function BuildNameMap()
             map[auraName] = key
         end
     end
+    -- Warrior shouts (Data.lua). Rank-independent like the blessings above --
+    -- the name a shout carries is the same at every rank -- and tracked here
+    -- rather than as StatusBarChecks because the Shout Bar is the only thing
+    -- reading them; they are not raid-wide coverage rows.
+    for _, shout in ipairs(WhoDoesWhat.WarriorShouts) do
+        nameToKey[shout.name] = shout.key
+    end
 end
 
 -- ---------------------------------------------------------------------------

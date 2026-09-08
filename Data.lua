@@ -55,10 +55,16 @@ WhoDoesWhat.Classes = {
         roles = {
             { name = "Beast Mastery", icon = 132164, id = "hunter_bm", wowRole = "dps" },
             { name = "Survival", icon = 132215, id = "hunter_surv", wowRole = "dps" },
-            { name = "Marksmanship", icon = 132243, id = "hunter_mm", wowRole = "dps" }
+            { name = "Marksmanship", icon = 132243, id = "hunter_mm", wowRole = "dps" },
+            -- A hunter who stands in melee. Spec-wise it is the three above
+            -- (same Beast Mastery icon, same blessing order); what it says is
+            -- where they stand, which is the one thing the raid can't read off
+            -- a talent tree -- and what puts them inside a Battle Shout
+            -- (BattleShoutWantedByRole below).
+            { name = "Melee Hunter", icon = 132164, id = "hunter_melee", wowRole = "dps" }
         },
         categories = {
-            { name = "DPS",  icon = 626000, id = "cat_hunter_dps",  allSubRoles = { "hunter_bm", "hunter_surv", "hunter_mm" } } -- class icon
+            { name = "DPS",  icon = 626000, id = "cat_hunter_dps",  allSubRoles = { "hunter_bm", "hunter_surv", "hunter_mm", "hunter_melee" } } -- class icon
         }
     },
     {
@@ -294,6 +300,35 @@ WhoDoesWhat.RighteousFury = {
     name = GetSpellInfo(25780) or "Righteous Fury",
     icon = GetSpellTexture(25780),
 }
+
+-- The warrior shouts the Shout Bar watches (Views/WarriorShoutBarView.lua),
+-- in display order.
+--
+-- Ids are the BASE rank of each shout, like the paladin auras above: a base
+-- rank is the one id that never changes between Classic Era and TBC, and only
+-- the localized name and icon are read off it. Commanding Shout arrived with
+-- TBC, so Classic Era carries one shout and the bar shows one icon.
+--
+-- `everyone` is who the shout is FOR. Battle Shout is attack power, so it
+-- goes to the roles that want it (WantsBattleShout below); Commanding Shout
+-- is health, which nobody in the group turns down.
+WhoDoesWhat.WarriorShouts = {
+    { key = "battleShout", spellId = 6673, name_short = "Battle" },
+}
+if not features.isClassicEra then
+    table.insert(WhoDoesWhat.WarriorShouts,
+        { key = "commandingShout", spellId = 469, name_short = "Commanding",
+          everyone = true })
+end
+-- Resolve names and icons off the ids, dropping anything this client's spell
+-- database doesn't know rather than carrying a nameless shout into the bar.
+local knownShouts = {}
+for _, shout in ipairs(WhoDoesWhat.WarriorShouts) do
+    shout.name = GetSpellInfo(shout.spellId)
+    shout.icon = GetSpellTexture(shout.spellId)
+    if shout.name then knownShouts[#knownShouts + 1] = shout end
+end
+WhoDoesWhat.WarriorShouts = knownShouts
 
 -- Raid-wide status bars beyond paladin blessings. Aura names are deliberately
 -- rank-independent and include both the single-target and group versions.
@@ -1035,6 +1070,37 @@ WhoDoesWhat.PaladinBuffBansByRole = {
     druid_dreamstate = { might = true },
 }
 
+-- Which roles want Battle Shout on them (the `wantsBattleShout` field every
+-- role entry ends up carrying, attached in PopulateRolesAndCategories).
+--
+-- The default is derived from the Might bans directly above: a role that wants
+-- Blessing of Might wants attack power, and a role that bans Might has no use
+-- for a shout either. Only the roles that disagree with that reading are
+-- listed here -- which is the hunters, the one group whose answer is about
+-- where they stand rather than what they cast. A ranged hunter is outside the
+-- shout's radius, so counting them as missing it would leave the bar glowing
+-- at something nobody can fix; their pet, standing on the boss, is squarely
+-- inside it. `hunter_melee` exists to say the hunter is in there with it.
+WhoDoesWhat.BattleShoutWantedByRole = {
+    hunter_bm = false,
+    hunter_surv = false,
+    hunter_mm = false,
+    hunter_tank = false,
+    hunter_melee = true,
+    hunter_pets = true,
+    non_raider = false,
+}
+
+-- Fallback while a player's role is still unset or undetected: their class.
+-- Spelled out rather than derived from the role table, because the two classes
+-- whose roles disagree with each other -- Hunter (melee vs ranged) and Druid
+-- (feral vs caster) -- need opposite answers, and a majority rule that landed
+-- on both by accident would be a rule nobody could read.
+WhoDoesWhat.BattleShoutWantedByClass = {
+    Warrior = true, Paladin = true, Rogue = true, Shaman = true, Druid = true,
+    Hunter = false, Priest = false, Mage = false, Warlock = false,
+}
+
 WhoDoesWhat.HunterPetBuffOrder = { "might", "kings", "light" }
 
 -- Default paladin buff priority orders, grouped so many roles can share one
@@ -1061,7 +1127,7 @@ WhoDoesWhat.PaladinBuffDefaults = {
     {
         -- Physical-leaning mana hybrids: Might stays high.
         order = { "salv", "might", "kings", "wisdom", "light", "sanctuary" },
-        roles = { "hunter_bm", "hunter_surv", "hunter_mm", "shaman_enh" },
+        roles = { "hunter_bm", "hunter_surv", "hunter_mm", "hunter_melee", "shaman_enh" },
     },
     {
         order = { "salv", "kings", "might", "wisdom", "light", "sanctuary" },
@@ -1369,7 +1435,42 @@ function WhoDoesWhat:PopulateRolesAndCategories()
         end
     end
 
+    -- Attach `wantsBattleShout` to every entry, last so custom and raid roles
+    -- are registered and get one too. A custom role has no Might ban to read,
+    -- so it falls through to its class's answer -- the same guess the shout
+    -- bar makes for a player whose role is not set yet.
+    for roleId, entry in pairs(self.RolesAndCategories) do
+        local wanted = self.BattleShoutWantedByRole[roleId]
+        if wanted == nil then
+            local bans = self.PaladinBuffBansByRole[roleId]
+            if bans then
+                wanted = not bans.might
+            elseif entry.isCustom then
+                wanted = self.BattleShoutWantedByClass[entry.classInfo
+                    and entry.classInfo.name]
+            else
+                wanted = true
+            end
+        end
+        entry.wantsBattleShout = wanted and true or false
+    end
+
     self:LogUiBuilding("Roles and categories lookup table populated.")
+end
+
+-- Does this member want Battle Shout on them? Takes a roster member (the
+-- { name, classInfo, isPet } shape Assignments.lua hands out) and answers from
+-- their assigned role, falling back to their class while the role is unset or
+-- unresolved (one synced from a client carrying a role this one doesn't know).
+-- A hunter pet has no assignment of its own -- nothing is assignable to it --
+-- so it reads the pet pseudo-role's answer directly.
+function WhoDoesWhat:WantsBattleShout(m)
+    local roleId = m.isPet and self.HUNTER_PET_ROLE_ID
+        or self:GetAssignedRole(m.name)
+    local entry = roleId and self.RolesAndCategories[roleId]
+    if entry then return entry.wantsBattleShout end
+    return self.BattleShoutWantedByClass[m.classInfo and m.classInfo.name]
+        or false
 end
 
 -- Check if a role ID is a category

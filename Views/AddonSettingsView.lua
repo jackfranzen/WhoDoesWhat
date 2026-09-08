@@ -210,8 +210,14 @@ local function AddTooltip(region, title, text)
     end)
 end
 
+-- The label, the arrow button, and the box between them. The box is the part
+-- of a dropdown people actually point at -- it is where the current value is
+-- written -- and it used to be the one part with no tooltip on it. Enabling
+-- the mouse on the dropdown frame is safe: its arrow is a child button and
+-- still takes the clicks.
 local function AddDropdownTooltip(dd, label, title, text)
     AddTooltip(label, title, text)
+    AddTooltip(dd, title, text)
     local button = _G[dd:GetName() .. "Button"]
     if button then AddTooltip(button, title, text) end
 end
@@ -1121,7 +1127,7 @@ local function EnsureSettingsFrame()
     local buttons = {}
     local sectionLabels = {
         "General", "Status Bars", "Buff Tracking", "Paladin Bar",
-        "Warlocks", "Testing", "Developer",
+        "Warriors", "Warlocks", "Testing", "Developer",
     }
 
     local function SelectSection(index)
@@ -1704,8 +1710,150 @@ local function EnsureSettingsFrame()
             WhoDoesWhat:RefreshPaladinBuffingBar()
         end)
 
+    -- ---- Warrior ----
+    local warriorPage = pages[5]
+    yL = y0
+    yL = AddHeading(warriorPage, CONTENT_X, yL, "Warrior Shouts", 0.78, 0.61, 0.43)
+
+    local shoutIntro = warriorPage:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    shoutIntro:SetPoint("TOPLEFT", CONTENT_X + 4, -yL)
+    shoutIntro:SetWidth(CONTENT_W - 8)
+    shoutIntro:SetJustifyH("LEFT")
+    shoutIntro:SetTextColor(0.7, 0.7, 0.7)
+    shoutIntro:SetText("An efficient warrior buffing bar for shouts. Includes"
+        .. " pets and ignores irrelevant party members based on WDW roles."
+        .. " Hover the bar and check the tooltips for additional info")
+    yL = yL + math.ceil(shoutIntro:GetStringHeight()) + 12
+
+    local shoutShowLabel = warriorPage:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    shoutShowLabel:SetPoint("TOPLEFT", CONTENT_X + 4, -(yL + 4))
+    shoutShowLabel:SetText("Show shout bar:")
+    local shoutShowDD = CreateFrame("Frame", "WhoDoesWhatShoutBarShowDD", warriorPage,
+        "UIDropDownMenuTemplate")
+    shoutShowDD:SetPoint("LEFT", shoutShowLabel, "RIGHT", -6, -2)
+    UIDropDownMenu_SetWidth(shoutShowDD, 120)
+    WhoDoesWhat:StyleDropdown(shoutShowDD, true)
+    UIDropDownMenu_Initialize(shoutShowDD, function(_, level)
+        local saved = WhoDoesWhat:GetShoutBarMode()
+        for _, mode in ipairs(WhoDoesWhat.ShoutBarModes) do
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = mode.label
+            info.checked = (saved == mode.key)
+            info.func = function()
+                WhoDoesWhat.db.profile.settings.shoutBarShow = mode.key
+                UIDropDownMenu_SetText(shoutShowDD, mode.label)
+                WhoDoesWhat:LogUiBuilding("Warrior Shout Bar set to "
+                    .. mode.label .. ".")
+                WhoDoesWhat:UpdateWarriorShoutBarVisibility()
+            end
+            UIDropDownMenu_AddButton(info, level)
+        end
+    end)
+    -- Category names in yellow so the four answers are scannable, and Always
+    -- in red because it is a testing setting: a shout bar in a group with no
+    -- warrior is glowing at something nobody present can cast.
+    AddDropdownTooltip(shoutShowDD, shoutShowLabel, "Show shout bar",
+        "|cffffd100Warriors only:|r Only visible if YOU are a warrior"
+        .. "\n\n|cffffd100With a warrior:|r Only visible with a warrior in"
+        .. " your group"
+        .. "\n\n|cffff4d4dAlways:|r Testing only - shown even with no warrior"
+        .. " around to cast anything"
+        .. "\n\n|cffffd100Never:|r never shown")
+    f.shoutShowDD = shoutShowDD
+
+    local shoutAnchorLabel = warriorPage:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    shoutAnchorLabel:SetPoint("TOPLEFT", CONTENT_X + 4, -(yL + 34))
+    shoutAnchorLabel:SetText("Anchor:")
+    local shoutAnchorDD = CreateFrame("Frame", "WhoDoesWhatShoutBarAnchorDD",
+        warriorPage, "UIDropDownMenuTemplate")
+    shoutAnchorDD:SetPoint("LEFT", shoutAnchorLabel, "RIGHT", -6, -2)
+    UIDropDownMenu_SetWidth(shoutAnchorDD, 90)
+    WhoDoesWhat:StyleDropdown(shoutAnchorDD, true)
+    UIDropDownMenu_Initialize(shoutAnchorDD, function(_, level)
+        local saved = WhoDoesWhat:GetShoutBarAnchor()
+        for _, anchor in ipairs(WhoDoesWhat.ShoutBarAnchors) do
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = anchor.label
+            info.checked = (saved == anchor.key)
+            info.func = function()
+                WhoDoesWhat:SetShoutBarAnchor(anchor.key)
+                UIDropDownMenu_SetText(shoutAnchorDD, anchor.label)
+            end
+            UIDropDownMenu_AddButton(info, level)
+        end
+    end)
+    AddDropdownTooltip(shoutAnchorDD, shoutAnchorLabel, "Anchor",
+        "Which edge of the bar stays put when a shout icon comes or goes."
+        .. " Center spreads it both ways.")
+    f.shoutAnchorDD = shoutAnchorDD
+
+    local shoutTimerLabel = warriorPage:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    shoutTimerLabel:SetPoint("TOPLEFT", CONTENT_X + 4, -(yL + 64))
+    shoutTimerLabel:SetText("Countdown at:")
+    local shoutTimerDD = CreateFrame("Frame", "WhoDoesWhatShoutBarTimerDD",
+        warriorPage, "UIDropDownMenuTemplate")
+    shoutTimerDD:SetPoint("LEFT", shoutTimerLabel, "RIGHT", -6, -2)
+    UIDropDownMenu_SetWidth(shoutTimerDD, 70)
+    WhoDoesWhat:StyleDropdown(shoutTimerDD, true)
+    UIDropDownMenu_Initialize(shoutTimerDD, function(_, level)
+        local saved = WhoDoesWhat:GetShoutBarTimerSeconds()
+        for _, seconds in ipairs(WhoDoesWhat.ShoutBarTimerSeconds) do
+            local label = WhoDoesWhat:GetShoutBarTimerLabel(seconds)
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = label
+            info.checked = (saved == seconds)
+            info.func = function()
+                WhoDoesWhat.db.profile.settings.shoutBarTimerSeconds = seconds
+                UIDropDownMenu_SetText(shoutTimerDD, label)
+                WhoDoesWhat:RefreshWarriorShoutBar()
+            end
+            UIDropDownMenu_AddButton(info, level)
+        end
+    end)
+    AddDropdownTooltip(shoutTimerDD, shoutTimerLabel, "Countdown at",
+        "Puts a countdown over the icon when the first person is about to lose"
+        .. " the shout. Off hides it entirely.")
+    f.shoutTimerDD = shoutTimerDD
+
+    f.shoutHideBackgroundCheck, yL = AddCompactCheckboxRow(warriorPage,
+        CONTENT_X, yL + 98, "Hide background",
+        "Leaves just the icons floating on your screen. Alt-drag still moves"
+        .. " the bar.",
+        function(value)
+            WhoDoesWhat.db.profile.settings.shoutBarHideBackground = value
+            WhoDoesWhat:RefreshWarriorShoutBar()
+        end)
+
+    f.shoutHideNumbersCheck, yL = AddCompactCheckboxRow(warriorPage,
+        CONTENT_X, yL, "Hide numbers",
+        "Drops the count under each icon. The glow still tells you somebody is"
+        .. " missing the shout, and the tooltip still names them.",
+        function(value)
+            WhoDoesWhat.db.profile.settings.shoutBarHideNumbers = value
+            WhoDoesWhat:RefreshWarriorShoutBar()
+        end)
+
+    f.shoutHideWhenBuffedCheck, yL = AddCompactCheckboxRow(warriorPage,
+        CONTENT_X, yL, "Hide while everything is up",
+        "Hides each icon while its own shout is on everybody, and brings it"
+        .. " back the moment somebody loses it. Hidden icons can't be clicked"
+        .. " or dragged, so place the bar before turning this on.",
+        function(value)
+            WhoDoesWhat.db.profile.settings.shoutBarHideWhenBuffed = value
+            WhoDoesWhat:RefreshWarriorShoutBar()
+        end)
+
+    f.shoutIgnoreRangeCheck, yL = AddCompactCheckboxRow(warriorPage,
+        CONTENT_X, yL, "Ignore players far out of range",
+        "Stops counting party members who are nowhere near you. Anyone just a"
+        .. " step too far back still counts, since stepping in is the fix.",
+        function(value)
+            WhoDoesWhat.db.profile.settings.shoutBarIgnoreOutOfRange = value
+            WhoDoesWhat:RefreshWarriorShoutBar()
+        end)
+
     -- ---- Warlock ----
-    local warlockPage = pages[5]
+    local warlockPage = pages[6]
     yL = y0
     yL = AddHeading(warlockPage, CONTENT_X, yL, "Warlock Curses", 0.72, 0.45, 1)
     local magicCurseLabel = IS_CLASSIC_ERA and "Auto assign elements and shadow"
@@ -1730,7 +1878,7 @@ local function EnsureSettingsFrame()
         end)
 
     -- ---- Developer ----
-    local developerPage = pages[7]
+    local developerPage = pages[8]
     local yR = y0
     yR = AddHeading(developerPage, CONTENT_X, yR, "Developer Options")
     f.devModeCheck, yR = AddCompactCheckboxRow(developerPage, CONTENT_X, yR, "Developer Mode",
@@ -1798,7 +1946,7 @@ local function EnsureSettingsFrame()
 --@end-do-not-package@
 
     -- ---- Testing ----
-    local testingPage = pages[6]
+    local testingPage = pages[7]
     yR = y0
     yR = AddHeading(testingPage, CONTENT_X, yR, "Testing")
     f.fakeRaidCheck, yR = AddCompactCheckboxRow(testingPage, CONTENT_X, yR, "Populate Fake Raid",
@@ -1948,6 +2096,17 @@ function WhoDoesWhat:OpenAddonSettingsView(section)
     f.logSyncTrafficCheck:SetChecked(self.LOG_SYNC)
     f.logBuffingClicksCheck:SetChecked(settings.logBuffingBarClicks)
     f.logRolePromotionCheck:SetChecked(settings.logRolePromotion)
+    local shoutMode = self:GetShoutBarMode()
+    UIDropDownMenu_SetText(f.shoutShowDD, self:GetShoutBarModeLabel(shoutMode))
+    local shoutAnchor = self:GetShoutBarAnchor()
+    UIDropDownMenu_SetText(f.shoutAnchorDD,
+        self:GetShoutBarAnchorLabel(shoutAnchor))
+    UIDropDownMenu_SetText(f.shoutTimerDD,
+        self:GetShoutBarTimerLabel(self:GetShoutBarTimerSeconds()))
+    f.shoutHideBackgroundCheck:SetChecked(settings.shoutBarHideBackground)
+    f.shoutHideNumbersCheck:SetChecked(settings.shoutBarHideNumbers)
+    f.shoutHideWhenBuffedCheck:SetChecked(settings.shoutBarHideWhenBuffed)
+    f.shoutIgnoreRangeCheck:SetChecked(settings.shoutBarIgnoreOutOfRange)
     f.afflElementsCheck:SetChecked(settings.autoAssignAfflictionElements)
     f.recklessnessCheck:SetChecked(settings.allowRecklessnessAutoAssign)
 --@do-not-package@

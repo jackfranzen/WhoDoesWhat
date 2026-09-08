@@ -459,6 +459,34 @@ local defaults = {
             -- Which aura the swapper currently offers (a WhoDoesWhat.PaladinAuras
             -- key); nil = the first aura this paladin knows.
             buffingBarAura = nil,
+            -- When the Warrior Shout Bar is on screen: "warriorOnly" (only
+            -- while you are a warrior), "withWarrior" (whenever the group has
+            -- one), "always", or "never". See Views/WarriorShoutBarView.lua.
+            shoutBarShow = "warriorOnly",
+            -- Where it was last Alt-dragged to; nil = centred.
+            shoutBarPos = nil,
+            -- Which edge holds still as the bar changes width (a second
+            -- warrior joining or leaving adds or drops the second icon):
+            -- "LEFT", "CENTER" (spread from the midpoint) or "RIGHT".
+            shoutBarAnchor = "CENTER",
+            -- Chrome the bar can do without: its backdrop, and the
+            -- covered/total count under each icon.
+            shoutBarHideBackground = false,
+            shoutBarHideNumbers = false,
+            -- How close the soonest-to-lapse shout gets before its countdown
+            -- appears over the icon: 30, 15 or 10 seconds, or 0 for never.
+            shoutBarTimerSeconds = 30,
+            -- Leave raiders who are nowhere near you (UnitInRange, ~40 yards)
+            -- out of the shout counts entirely. Off: someone standing a little
+            -- too far back is a gap worth showing, not one worth hiding.
+            shoutBarIgnoreOutOfRange = false,
+            -- Which shout the single icon covers while the party has one
+            -- warrior (a WhoDoesWhat.WarriorShouts key); right-clicking that
+            -- icon swaps it. nil = Battle Shout.
+            shoutBarSoloShout = nil,
+            -- Fade the bar out while every shout is on everybody, bringing it
+            -- back the moment one goes missing or a countdown starts.
+            shoutBarHideWhenBuffed = false,
             -- Movable per-paladin live blessing coverage window. On out of the
             -- box: it is the view that says what still needs doing, and a fresh
             -- install has no reason to hunt for it in the settings.
