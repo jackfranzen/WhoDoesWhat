@@ -441,15 +441,25 @@ local defaults = {
             -- Which paladin's jobs the bar renders while buffingBarTestMode is
             -- on (a real or fake paladin's name); nil = the first one found.
             buffingBarTestPaladin = nil,
-            -- Which way the buffing bar grows as blessings are added: "RIGHT"
-            -- (anchor its left edge), "LEFT" (anchor its right edge) or
-            -- "CENTER" (anchor its midpoint, spreading both ways).
+            -- Whether the buffing bar lays its buttons out as a row
+            -- ("HORIZONTAL") or a column ("VERTICAL"). The orientation decides
+            -- which values the two grow settings below take.
+            buffingBarOrientation = "HORIZONTAL",
+            -- Which way the buffing bar grows as blessings are added. Row:
+            -- "RIGHT" (anchor its left edge), "LEFT" (anchor its right edge)
+            -- or "CENTER" (anchor its midpoint, spreading both ways). Column:
+            -- "DOWN" (anchor its top edge), "UP" (its bottom edge) or "CENTER".
             buffingBarGrow = "RIGHT",
             -- Preferred direction for the per-player menu shown by hovering a
-            -- class button. The view flips it when that side lacks screen room.
+            -- class button -- "DOWN"/"UP" for a row, "RIGHT"/"LEFT" for a
+            -- column. The view flips it when that side lacks screen room.
             buffingMenuGrow = "DOWN",
-            -- Highlight active blessings yellow during their final five minutes.
-            buffingMenuWarnExpiring = true,
+            -- Drop a class button off the bar while every member it covers is
+            -- buffed, leaving only the work still outstanding.
+            buffingBarHideCompleted = false,
+            -- How close to lapsing a blessing gets before the bar says so: a
+            -- countdown over the class button and a yellow player row. 1-10.
+            buffingMenuWarnMinutes = 6,
             -- The two self-buff buttons anchored at the left end of the buffing
             -- bar, ahead of the class buttons. Both act on the local player: an
             -- aura swapper, and a Righteous Fury reminder that only appears

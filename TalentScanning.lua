@@ -203,6 +203,34 @@ local function NativeRankAt(t, isInspect, group)
     return 0
 end
 
+-- The local player's own rank in a talent found by NAME, across every tree.
+-- Returns the rank and whether a talent of that name exists at all, so a caller
+-- that HIDES something on a zero rank can tell "not talented" apart from "no
+-- such talent on this client" and stay quiet in the second case.
+--
+-- By name rather than by (tier, column) because the caller -- the buffing bar,
+-- asking whether a talent-granted aura is actually granted -- is matching a
+-- SPELL name it already holds, and a talent that grants a spell carries that
+-- spell's name. Both strings come from this client, so it is locale-proof, and
+-- unlike a coordinate it cannot be quietly wrong when a tree is laid out
+-- differently than we assumed (which is exactly how the first cut of this
+-- failed). Callers cache the answer: it only changes on a respec.
+-- Called plainly, with none of the isInspect/isPet/group arguments the scans
+-- above pass: this only ever asks about the player's own current spec, that is
+-- the form the client answers reliably here, and a group index it doesn't like
+-- comes back as a nil name for every talent -- which reads as "no such talent"
+-- and would quietly wave the aura through.
+function WhoDoesWhat:GetOwnTalentRankByName(talentName)
+    if not talentName then return 0, false end
+    for tab = 1, (GetNumTalentTabs() or 3) do
+        for i = 1, (GetNumTalents(tab) or 0) + 10 do
+            local name, _, _, _, rank = GetTalentInfo(tab, i)
+            if name == talentName then return rank or 0, true end
+        end
+    end
+    return 0, false
+end
+
 -- Save a paladin's buff-talent ranks under their name key. Ranks are read from
 -- the client's native talent API by (tier, column) -- see PALADIN_BUFF_TALENTS
 -- for why the library's positional cache can't be trusted on this client.

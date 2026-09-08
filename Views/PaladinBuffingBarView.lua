@@ -16,7 +16,8 @@ local PBegin, PEnd = WhoDoesWhat.Profiling.Begin, WhoDoesWhat.Profiling.End
 --
 -- Two optional self-buff buttons lead the row, split off by a hairline: an
 -- aura swapper (hovering opens a picker of every castable aura, left-click
--- casts whichever one it is currently offering) and,
+-- casts whichever one it is currently offering, and picking one out of the
+-- list casts it too) and,
 -- while the paladin holds a tank role, a Righteous Fury refresher. Unlike the
 -- class buttons these are about the LOCAL player, and neither carries a
 -- coverage count -- just a red glow when the buff is missing, yellow with a
@@ -27,9 +28,9 @@ local PBegin, PEnd = WhoDoesWhat.Profiling.Begin, WhoDoesWhat.Profiling.End
 -- (real or fake), so you can preview the bar as any raid paladin.
 --
 -- Styled like the other WDW windows (dark backdrop, tooltip border, a "WDW
--- Buffs" title strip). Moved by Alt-dragging; grows left or right per the
--- settings option; a pulsing red frame alerts when any assigned raider is
--- missing a blessing.
+-- Buffs" title strip). Moved by Alt-dragging; laid out as a row or a column
+-- and growing whichever way along that axis the settings option picks; a
+-- pulsing red frame alerts when any assigned raider is missing a blessing.
 
 local bar = nil
 
@@ -39,7 +40,7 @@ local TITLE_H = 12     -- title strip height
 local BTN_SIZE = 28
 local BTN_GAP = 3
 local MIN_BUTTONS_WIDE = 3
-local COUNT_H = 10     -- room under a button for its count text
+local COUNT_H = 10     -- room under a button for its count text (row layout)
 local PLAYER_MENU_W = 180
 local PLAYER_HEADER_H = 24
 local PLAYER_W = PLAYER_MENU_W - INSET * 2
@@ -47,6 +48,10 @@ local PLAYER_H = 22
 local PLAYER_GAP = 0
 local AURA_MENU_LABEL_H = 12 -- row caption above each block of aura icons
 local AURA_MENU_ROW_GAP = 4
+-- The picker's own header: one line of hint, unlike the player menus' two, so
+-- it doesn't need their strip height.
+local AURA_HEADER_H = 15
+local AURA_PAD = 5 -- breathing room between the panel's edge and its contents
 local MISSING_ICON = "Interface\\RaidFrame\\ReadyCheck-NotReady"
 local MISSING_GLOW_COLOR = { 1, 0.05, 0.05, 1 }
 local EXPIRING_GLOW_COLOR = { 1, 0.82, 0.2, 1 }
@@ -62,6 +67,89 @@ local GetBuffDataByIndex = C_UnitAuras and C_UnitAuras.GetBuffDataByIndex
 
 -- y from the bar's top down to where the button row begins.
 local CONTENT_TOP = INSET + TITLE_H + 2
+
+-- ---------------------------------------------------------------------------
+-- Orientation
+-- ---------------------------------------------------------------------------
+--
+-- The bar lays its buttons out along one axis, chosen in the settings: a row
+-- growing sideways (the original), or a column growing up/down. Everything
+-- that has a direction follows suit -- which way the bar grows, which edge a
+-- saved position is anchored by, which side the popout menus and tooltips open
+-- on, and whether a button's count sits under it or beside it.
+
+-- The two grow settings speak the axis they're on, so flipping the bar
+-- translates a saved choice instead of discarding it (a bar that grew right
+-- now grows down, and flipping back restores "right").
+local GROW_FLIP = { RIGHT = "DOWN", LEFT = "UP", CENTER = "CENTER",
+    DOWN = "RIGHT", UP = "LEFT" }
+local MENU_FLIP = { DOWN = "RIGHT", UP = "LEFT", RIGHT = "DOWN", LEFT = "UP" }
+local BAR_GROWS = {
+    HORIZONTAL = { RIGHT = true, LEFT = true, CENTER = true },
+    VERTICAL = { DOWN = true, UP = true, CENTER = true },
+}
+local MENU_GROWS = {
+    HORIZONTAL = { DOWN = true, UP = true },
+    VERTICAL = { RIGHT = true, LEFT = true },
+}
+
+local function Vertical()
+    return WhoDoesWhat.db.profile.settings.buffingBarOrientation == "VERTICAL"
+end
+
+-- Both readers coerce a value left over from the other orientation, so a
+-- half-migrated profile lays out sanely instead of falling back to nothing.
+local function BarGrow()
+    local axis = Vertical() and "VERTICAL" or "HORIZONTAL"
+    local saved = WhoDoesWhat.db.profile.settings.buffingBarGrow
+    if saved and BAR_GROWS[axis][saved] then return saved end
+    if saved and BAR_GROWS[axis][GROW_FLIP[saved] or ""] then return GROW_FLIP[saved] end
+    return Vertical() and "DOWN" or "RIGHT"
+end
+
+local function MenuGrow()
+    local axis = Vertical() and "VERTICAL" or "HORIZONTAL"
+    local saved = WhoDoesWhat.db.profile.settings.buffingMenuGrow
+    if saved and MENU_GROWS[axis][saved] then return saved end
+    if saved and MENU_GROWS[axis][MENU_FLIP[saved] or ""] then return MENU_FLIP[saved] end
+    return Vertical() and "RIGHT" or "DOWN"
+end
+
+-- The settings view asks for these so its dropdowns offer the right words.
+function WhoDoesWhat:GetBuffingBarGrow() return BarGrow() end
+function WhoDoesWhat:GetBuffingMenuGrow() return MenuGrow() end
+
+-- ---------------------------------------------------------------------------
+-- Expiry warning
+-- ---------------------------------------------------------------------------
+
+-- How close to lapsing a blessing gets before the bar starts saying so, in
+-- whole minutes. One number drives both tells: the countdown over a class
+-- button and the yellow player row underneath it.
+WhoDoesWhat.BuffingWarnMinutes = { 10, 9, 8, 7, 6, 5, 4, 3, 2, 1 }
+
+function WhoDoesWhat:GetBuffingWarnMinutes()
+    local saved = self.db.profile.settings.buffingMenuWarnMinutes
+    for _, minutes in ipairs(self.BuffingWarnMinutes) do
+        if saved == minutes then return minutes end
+    end
+    return 6
+end
+
+local function WarnSeconds()
+    return WhoDoesWhat:GetBuffingWarnMinutes() * 60
+end
+
+-- Minutes while there is more than one left, seconds for the last of them.
+-- Minutes round UP, so the number is what you still have rather than what you
+-- have lost -- which is also why "1m" never appears: at 60 seconds and under
+-- the countdown is already speaking seconds.
+local function FormatCountdown(remaining)
+    if remaining > 60 then
+        return string.format("%dm", math.ceil(remaining / 60))
+    end
+    return string.format("%ds", math.ceil(remaining))
+end
 
 -- ---------------------------------------------------------------------------
 -- Which paladin to render
@@ -116,41 +204,57 @@ end
 -- ---------------------------------------------------------------------------
 
 -- Save the current on-screen rect, anchoring by the part of the bar that must
--- hold still as buttons come and go: the left edge for RIGHT growth, the right
--- edge for LEFT, and the horizontal midpoint for CENTER (which then spreads
--- both ways). The anchor point encodes the choice, so a saved position is
--- self-describing and a mode change just re-derives it from the current rect.
-local GROW_POINTS = { RIGHT = "TOPLEFT", LEFT = "TOPRIGHT", CENTER = "TOP" }
+-- hold still as buttons come and go: for a row, the left edge for RIGHT growth,
+-- the right edge for LEFT and the horizontal midpoint for CENTER (which then
+-- spreads both ways); for a column, the top edge for DOWN, the bottom edge for
+-- UP and the vertical midpoint for CENTER. The anchor point encodes the
+-- choice, so a saved position is self-describing and a mode change -- growth or
+-- orientation -- just re-derives it from the current rect.
+local GROW_POINTS = {
+    HORIZONTAL = { RIGHT = "TOPLEFT", LEFT = "TOPRIGHT", CENTER = "TOP" },
+    VERTICAL = { DOWN = "TOPLEFT", UP = "BOTTOMLEFT", CENTER = "LEFT" },
+}
+local VALID_POINTS = {
+    TOPLEFT = true, TOPRIGHT = true, TOP = true, BOTTOMLEFT = true, LEFT = true,
+}
 
+-- Each half of the anchor point says what its coordinate measures: an edge the
+-- point names, or the midpoint of that axis when it names neither.
 local function ClampPosition(x, y, point)
     local parentW, parentH = UIParent:GetWidth(), UIParent:GetHeight()
-    local width = bar:GetWidth()
-    if point == "TOPRIGHT" then
+    local width, height = bar:GetWidth(), bar:GetHeight()
+    if point:find("RIGHT") then
         x = math.max(math.min(width, parentW), math.min(x, parentW))
-    elseif point == "TOP" then
+    elseif point:find("LEFT") then
+        x = math.max(0, math.min(x, math.max(0, parentW - width)))
+    else
         -- x is the midpoint, so both halves have to stay on screen.
         local half = math.min(width / 2, parentW / 2)
         x = math.max(half, math.min(x, parentW - half))
-    else
-        x = math.max(0, math.min(x, math.max(0, parentW - width)))
     end
-    y = math.max(math.min(bar:GetHeight(), parentH), math.min(y, parentH))
+    if point:find("TOP") then
+        y = math.max(math.min(height, parentH), math.min(y, parentH))
+    elseif point:find("BOTTOM") then
+        y = math.max(0, math.min(y, math.max(0, parentH - height)))
+    else
+        local half = math.min(height / 2, parentH / 2)
+        y = math.max(half, math.min(y, parentH - half))
+    end
     return x, y
 end
 
 local function SavePosition()
     if not bar then return end
-    local grow = WhoDoesWhat.db.profile.settings.buffingBarGrow or "RIGHT"
-    local point = GROW_POINTS[grow] or GROW_POINTS.RIGHT
-    local x
-    if point == "TOPRIGHT" then
-        x = bar:GetRight()
-    elseif point == "TOP" then
-        x = bar:GetCenter()
-    else
-        x = bar:GetLeft()
-    end
-    local y = bar:GetTop()
+    local axis = Vertical() and "VERTICAL" or "HORIZONTAL"
+    local point = GROW_POINTS[axis][BarGrow()] or "TOPLEFT"
+    local cx, cy = bar:GetCenter()
+    local x, y
+    if point:find("RIGHT") then x = bar:GetRight()
+    elseif point:find("LEFT") then x = bar:GetLeft()
+    else x = cx end
+    if point:find("TOP") then y = bar:GetTop()
+    elseif point:find("BOTTOM") then y = bar:GetBottom()
+    else y = cy end
     if not x or not y then return end
     x, y = ClampPosition(x, y, point)
     WhoDoesWhat.db.profile.settings.buffingBarPos = { point = point, x = x, y = y }
@@ -160,8 +264,7 @@ local function LoadPosition()
     local p = WhoDoesWhat.db.profile.settings.buffingBarPos
     bar:ClearAllPoints()
     if p and p.x and p.y then
-        local point = (p.point == "TOPRIGHT" or p.point == "TOP")
-            and p.point or "TOPLEFT"
+        local point = VALID_POINTS[p.point] and p.point or "TOPLEFT"
         p.point = point
         p.x, p.y = ClampPosition(p.x, p.y, point)
         bar:SetPoint(point, UIParent, "BOTTOMLEFT", p.x, p.y)
@@ -170,7 +273,43 @@ local function LoadPosition()
     end
 end
 
--- Attach Alt-gated dragging to a mouse region that moves the whole bar.
+-- Dark fill and a thin tooltip border, matching the other WDW windows.
+--
+-- The border draws a corner piece edgeSize across, so a frame shorter than two
+-- of them stacks corner on corner and frays -- which is what the collapsed
+-- strip did at 18px tall wearing the windows' usual 16. It gets an edge sized
+-- to what it actually is instead; everything taller keeps the house one. Reapplied
+-- only on a change, since a repaint can run at 10Hz.
+local BAR_EDGE = 16
+local COLLAPSED_EDGE = 8
+
+local function ApplyBackdrop(edgeSize)
+    if bar.backdropEdge == edgeSize then return end
+    bar.backdropEdge = edgeSize
+    bar:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = false, edgeSize = edgeSize,
+        insets = { left = INSET, right = INSET, top = INSET, bottom = INSET },
+    })
+    bar:SetBackdropColor(0, 0, 0, 0.95)
+    bar:SetBackdropBorderColor(0.4, 0.4, 0.4)
+end
+
+-- Everything the bar pops out, shut at once. Dragging starts from anywhere on
+-- the bar, buttons included, so a menu opened by hovering that button is left
+-- riding along on top of wherever you are trying to put the bar. Combat-guarded
+-- because these hang off secure buttons.
+local function CloseAllPopouts()
+    if not bar or InCombatLockdown() then return end
+    GameTooltip:Hide()
+    for _, btn in ipairs(bar.buttons) do btn.playerMenu:Hide() end
+    if bar.auraButton then bar.auraButton.auraMenu:Hide() end
+end
+
+-- Attach Alt-gated dragging to a mouse region that moves the whole bar. Every
+-- button gets this as well as the frame and its title strip: the buttons cover
+-- most of the bar, and a column leaves barely anything else to grab.
 local function AttachAltDrag(region)
     region:EnableMouse(true)
     region:RegisterForDrag("LeftButton")
@@ -178,6 +317,7 @@ local function AttachAltDrag(region)
         if not IsAltKeyDown() then return end
         bar.moving = true
         bar:StartMoving()
+        CloseAllPopouts()
     end)
     region:SetScript("OnDragStop", function()
         if not bar.moving then return end
@@ -191,20 +331,35 @@ local function AttachAltDrag(region)
     end)
 end
 
--- Re-anchor to the growth-appropriate edge without visually moving the bar,
--- then repaint. Called from the settings dropdown.
-function WhoDoesWhat:SetBuffingBarGrow(mode)
-    self.db.profile.settings.buffingBarGrow = mode
+-- Re-anchor by the edge the new mode holds still, reading it off the rect the
+-- bar occupies right now, then let the repaint grow the other way from there.
+local function ReanchorAndRefresh()
     if bar and bar:GetLeft() then
         SavePosition()
         LoadPosition()
     end
-    self:RefreshPaladinBuffingBar()
+    WhoDoesWhat:RefreshPaladinBuffingBar()
+end
+
+function WhoDoesWhat:SetBuffingBarGrow(mode)
+    self.db.profile.settings.buffingBarGrow = mode
+    ReanchorAndRefresh()
 end
 
 function WhoDoesWhat:SetBuffingMenuGrow(mode)
     self.db.profile.settings.buffingMenuGrow = mode
     self:RefreshPaladinBuffingBar()
+end
+
+-- Turning the bar also turns both grow settings, so the saved choices stay on
+-- the axis they describe and the settings dropdowns have something to show.
+function WhoDoesWhat:SetBuffingBarOrientation(mode)
+    local s = self.db.profile.settings
+    if s.buffingBarOrientation == mode then return end
+    s.buffingBarOrientation = mode
+    s.buffingBarGrow = GROW_FLIP[s.buffingBarGrow or ""] or BarGrow()
+    s.buffingMenuGrow = MENU_FLIP[s.buffingMenuGrow or ""] or MenuGrow()
+    ReanchorAndRefresh()
 end
 
 -- ---------------------------------------------------------------------------
@@ -349,10 +504,27 @@ function WhoDoesWhat:TestPallyPowerBuffButtonCount()
     self:Print("PallyPower buff-button count check passed.")
 end
 
+-- The countdown over a class button: how long until the first of its buffed
+-- members loses their blessing, shown only once that is inside the warning
+-- window. Kept apart from the repaint below because it has to tick between
+-- repaints -- the bar's OnUpdate calls it off the stored expiry rather than by
+-- re-reading anybody's auras.
+local function UpdateJobTimer(btn)
+    local remaining = btn.expiresAt and (btn.expiresAt - GetTime())
+    if remaining and remaining > 0 and remaining < WarnSeconds() then
+        btn.timer:SetText(FormatCountdown(remaining))
+        btn.timer:Show()
+    else
+        btn.timer:Hide()
+    end
+end
+
 -- Combat-safe state for an existing class button. Secure spell/target
 -- attributes and button layout remain untouched until combat ends.
 local function UpdateButtonStatus(btn, job, nameToUnit)
     btn.visualJob = job
+    btn.expiresAt = job and job.soonest and (GetTime() + job.soonest) or nil
+    UpdateJobTimer(btn)
     if not job then
         btn.count:SetText("0/0")
         btn.count:SetTextColor(CountColor(0, 0))
@@ -415,8 +587,7 @@ local function UpdatePlayerAura(p)
         p.bg:SetColorTexture(0.14, 0.09, 0.09, 0.96)
         p.outline:SetColorTexture(0.055, 0.035, 0.035, 1)
     elseif found or not p.castUnit then
-        if remaining and remaining < 300
-            and WhoDoesWhat.db.profile.settings.buffingMenuWarnExpiring then
+        if remaining and remaining < WarnSeconds() then
             p.bg:SetColorTexture(0.38, 0.29, 0.03, 0.96)
             p.outline:SetColorTexture(0.16, 0.11, 0.01, 1)
         else
@@ -614,33 +785,69 @@ local function UpdatePlayerMenuStatus(btn, job, nameToUnit)
 end
 
 -- Which way something hanging off `btn` should open: the saved direction when
--- it fits, otherwise the roomier side. Shared by the class buttons' player
--- menus and the self-buff tooltips, so everything the bar pops out follows the
--- one setting and clamps the same way on short screens.
-local function PopoutDirection(btn, needed)
-    local preferred = WhoDoesWhat.db.profile.settings.buffingMenuGrow or "DOWN"
+-- it fits, otherwise the roomier side. A row's popouts open above or below the
+-- bar, a column's to one side of it, so the caller passes what the popout needs
+-- on both axes and only the live one is measured. Shared by the class buttons'
+-- player menus and the self-buff tooltips, so everything the bar pops out
+-- follows the one setting and clamps the same way on cramped screens.
+local function PopoutDirection(btn, needW, needH)
+    local preferred = MenuGrow()
+    if Vertical() then
+        -- A column's popouts hang off the bar's edges, so that is the room
+        -- worth measuring -- the button sits inside them.
+        local screenLeft = UIParent:GetLeft() or 0
+        local screenRight = UIParent:GetRight() or UIParent:GetWidth()
+        local left = (bar:GetLeft() or screenLeft) - screenLeft
+        local right = screenRight - (bar:GetRight() or screenRight)
+        if preferred == "LEFT" and left < needW and right > left then
+            return "RIGHT"
+        elseif preferred == "RIGHT" and right < needW and left > right then
+            return "LEFT"
+        end
+        return preferred
+    end
     local screenTop = UIParent:GetTop() or UIParent:GetHeight()
     local screenBottom = UIParent:GetBottom() or 0
     local above = screenTop - (btn:GetTop() or screenTop)
     local below = (btn:GetBottom() or screenBottom) - screenBottom
-    if preferred == "UP" and above < needed and below > above then
+    if preferred == "UP" and above < needH and below > above then
         return "DOWN"
-    elseif preferred == "DOWN" and below < needed and above > below then
+    elseif preferred == "DOWN" and below < needH and above > below then
         return "UP"
     end
     return preferred
 end
 
+-- Hang `region` (a menu frame, or the game tooltip) off `btn` on the resolved
+-- side, sharing the near corner so the popout lines up with the button. A
+-- sideways popout steps out to the bar's own edge instead of the button's, so
+-- it clears the counts a column keeps beside its icons rather than covering
+-- them; things already anchored to the whole bar get no step at all.
+local function EdgeStep(btn, side)
+    if btn == bar then return 0 end
+    local barEdge = side == "RIGHT" and bar:GetRight() or bar:GetLeft()
+    local btnEdge = side == "RIGHT" and btn:GetRight() or btn:GetLeft()
+    if not barEdge or not btnEdge then return 0 end
+    return barEdge - btnEdge
+end
+
+local function AnchorPopout(region, btn, direction)
+    region:ClearAllPoints()
+    if direction == "UP" then
+        region:SetPoint("BOTTOMLEFT", btn, "TOPLEFT", 0, 0)
+    elseif direction == "RIGHT" then
+        region:SetPoint("TOPLEFT", btn, "TOPRIGHT", EdgeStep(btn, "RIGHT"), 0)
+    elseif direction == "LEFT" then
+        region:SetPoint("TOPRIGHT", btn, "TOPLEFT", EdgeStep(btn, "LEFT"), 0)
+    else
+        region:SetPoint("TOPLEFT", btn, "BOTTOMLEFT", 0, 0)
+    end
+end
+
 local function PositionPlayerMenu(btn)
     local menu = btn.playerMenu
-    local direction = PopoutDirection(btn, menu:GetHeight())
-
-    menu:ClearAllPoints()
-    if direction == "UP" then
-        menu:SetPoint("BOTTOMLEFT", btn, "TOPLEFT", 0, 0)
-    else
-        menu:SetPoint("TOPLEFT", btn, "BOTTOMLEFT", 0, 0)
-    end
+    AnchorPopout(menu, btn,
+        PopoutDirection(btn, menu:GetWidth(), menu:GetHeight()))
     for i, p in ipairs(btn.playerButtons) do
         p:ClearAllPoints()
         p:SetPoint("TOPLEFT", menu, "TOPLEFT", INSET,
@@ -720,6 +927,19 @@ local function CreateButton(index)
     count:SetPoint("TOP", btn, "BOTTOM", 0, -1)
     btn.count = count
 
+    -- The expiry countdown, over the icon rather than under it (the shout bar's
+    -- trick): it is about the blessing itself, not about who has it, and it
+    -- only shows near the end -- when it wants to be the thing you see.
+    -- Outlined so it reads over a busy spell icon, and small enough that a
+    -- "10m" still fits inside one; the face follows the client's own.
+    local timer = btn:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
+    timer:SetPoint("CENTER")
+    local timerFont = GameFontNormal:GetFont()
+    timer:SetFont(timerFont or "Fonts\\FRIZQT__.TTF", 13, "OUTLINE")
+    timer:SetTextColor(1, 0.82, 0.2)
+    timer:Hide()
+    btn.timer = timer
+
     local playerMenu = CreateFrame("Frame", btn:GetName() .. "PlayerMenu", btn,
         "SecureHandlerShowHideTemplate, BackdropTemplate")
     playerMenu:SetFrameStrata("DIALOG")
@@ -764,8 +984,12 @@ local function CreateButton(index)
     end)
     SecureHandlerSetFrameRef(btn, "playerMenu", playerMenu)
     btn:Execute("otherMenus = newtable()")
+    -- Alt is the drag modifier, and dragging starts on the buttons too, so a
+    -- held Alt means "I am moving the bar" rather than "show me this class":
+    -- close what is open and open nothing.
     btn:SetAttribute("_onenter", [[
         for _, menu in ipairs(otherMenus) do menu:Hide() end
+        if IsAltKeyDown() then return end
         local menu = self:GetFrameRef("playerMenu")
         if menu:GetAttribute("Display") == 1 then
             menu:Show()
@@ -804,6 +1028,7 @@ local function CreateButton(index)
             .. " castable target" .. (choices == 1 and "" or "s") .. ")." .. test)
     end)
 
+    AttachAltDrag(btn)
     bar.buttons[index] = btn
     return btn
 end
@@ -849,6 +1074,7 @@ local function CreatePallyPowerButton()
         GameTooltip:Show()
     end)
     btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    AttachAltDrag(btn)
     btn:SetScript("OnClick", function()
         if not (_G.PallyPower
             and type(_G.PallyPowerBlessings_Toggle) == "function") then
@@ -1015,15 +1241,53 @@ local function FindOwnBuff(wanted)
     end
 end
 
--- Auras this paladin can actually cast. GetSpellInfo(name) only resolves for
--- spells in the player's own spellbook, which is what filters out the talent
--- auras (Concentration, Sanctity) and Crusader Aura before level 62. Test mode
--- keeps the full client list so the button previews sensibly on a non-paladin.
+-- Is a talent-granted aura actually granted? The client's spell database
+-- resolves Sanctity Aura for every paladin, talented or not, which is how it
+-- kept turning up in the picker for one who never took the Retribution talent
+-- that grants it. So the talent tree is asked, and asked BY NAME: the talent
+-- that grants a spell carries that spell's name, both strings come from this
+-- client, and unlike a grid coordinate it cannot be quietly wrong about where
+-- a tree puts things. No talent of that name at all means this client doesn't
+-- have one, which should not silently delete an aura -- so it shows.
+--
+-- Remembered until the spellbook changes: the answer only moves on a respec,
+-- and this sits on a repaint path that can run at 10Hz.
+local talentAuraGrants = {}
+
+local function ClearTalentAuraCache()
+    for k in pairs(talentAuraGrants) do talentAuraGrants[k] = nil end
+end
+
+local function TalentGrantsAura(aura)
+    if not aura.talent then return true end
+    local cached = talentAuraGrants[aura.key]
+    if cached ~= nil then return cached end
+    local rank, found = WhoDoesWhat:GetOwnTalentRankByName(aura.name)
+    local granted = (not found) or rank > 0
+    talentAuraGrants[aura.key] = granted
+    return granted
+end
+
+-- Auras this paladin can actually cast: known to the client (which is what
+-- keeps Crusader Aura out before level 62) and, for the talent auras, actually
+-- talented into.
+--
+-- Test mode falls back to the whole client list only for a NON-paladin, where
+-- there is no spellbook to ask and the buttons are pure layout preview. A real
+-- paladin previewing someone else's assignments keeps their own list: these two
+-- buttons cast for YOU whoever the bar is rendering, so offering an aura you
+-- cannot cast would be a lie -- and that blanket return was quietly hiding
+-- every filter below it from the one person able to notice.
 local function CastableAuras()
-    if WhoDoesWhat.db.profile.settings.buffingBarTestMode then return AURAS end
+    local _, class = UnitClass("player")
+    if WhoDoesWhat.db.profile.settings.buffingBarTestMode and class ~= "PALADIN" then
+        return AURAS
+    end
     local out = {}
     for _, aura in ipairs(AURAS) do
-        if GetSpellInfo(aura.name) then out[#out + 1] = aura end
+        if GetSpellInfo(aura.name) and TalentGrantsAura(aura) then
+            out[#out + 1] = aura
+        end
     end
     return out
 end
@@ -1050,8 +1314,11 @@ end
 -- player menu -- including closing every other popout the bar owns on the way
 -- in, so moving between buttons swaps menus with no auto-hide delay. Left-click
 -- still casts whatever aura the button is offering.
+-- A held Alt means the bar is being dragged, so the picker stands aside the
+-- same way the class buttons' player menus do.
 local AURA_ENTER_SNIPPET = [==[
     for _, menu in ipairs(otherMenus) do menu:Hide() end
+    if IsAltKeyDown() then return end
     local menu = self:GetFrameRef("auraMenu")
     if menu:GetAttribute("Display") == 1 then
         menu:Show()
@@ -1067,12 +1334,29 @@ local CLOSE_MENUS_SNIPPET = [==[
 ]==]
 
 -- One aura icon in the picker. Everything the click needs is baked onto the
--- option itself, so the swapper's offered aura can change mid-combat.
+-- option itself, so the swapper's offered aura can change mid-combat. The
+-- writes are idempotent, so this runs on either click edge without a guard.
 local AURA_OPTION_SNIPPET = [==[
     local swapper = self:GetFrameRef("auraButton")
     swapper:SetAttribute("astep", self:GetAttribute("astep"))
     swapper:SetAttribute("macrotext1", self:GetAttribute("auraMacro"))
-    self:GetParent():Hide()
+]==]
+
+-- Closing the picker is a POST body, and this is the whole reason the option
+-- casts at all: a pre body hides the option along with its parent before the
+-- button's own click handler ever runs, and a hidden button casts nothing --
+-- which is what made picking an aura merely select it. Post runs after that
+-- handler, so the cast lands first and the menu closes behind it.
+--
+-- Gated on the release for the same reason: hiding on the press takes the
+-- button away before a key-up client reaches its cast. Compared against false
+-- rather than tested for truth on purpose -- if a build ever stopped handing
+-- the snippet its `down`, the picker would linger until its own auto-hide
+-- instead of going back to eating casts.
+local AURA_OPTION_POST_SNIPPET = [==[
+    if down == false then
+        self:GetParent():Hide()
+    end
 ]==]
 
 -- Every tooltip the bar owns -- the self-buff buttons and the title strip --
@@ -1088,12 +1372,9 @@ local function ShowBarTooltip(frame)
     GameTooltip:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, 0)
     frame:FillTooltip()
     GameTooltip:Show()
-    GameTooltip:ClearAllPoints()
-    if PopoutDirection(anchor, GameTooltip:GetHeight() or 0) == "UP" then
-        GameTooltip:SetPoint("BOTTOMLEFT", anchor, "TOPLEFT", 0, 0)
-    else
-        GameTooltip:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, 0)
-    end
+    AnchorPopout(GameTooltip, anchor,
+        PopoutDirection(anchor, GameTooltip:GetWidth() or 0,
+            GameTooltip:GetHeight() or 0))
 end
 
 -- Rebuild in place while the mouse is still on the frame, so a rotated aura,
@@ -1128,8 +1409,10 @@ local function CreateSelfBuffButton(name, template)
     btn.count = count
 
     -- Hooked, not set: these carry secure enter/leave handlers from their
-    -- templates, and SetScript would throw them away.
+    -- templates, and SetScript would throw them away. Drag is its own script
+    -- pair, untouched by those templates, so AttachAltDrag can set as usual.
     btn:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    AttachAltDrag(btn)
     btn:Hide()
     return btn
 end
@@ -1137,15 +1420,20 @@ end
 -- Repaint the picker's icons: gold border on the offered aura, full colour on
 -- whichever one is actually running (the same "desaturated means not up"
 -- language the swapper itself uses). Safe in combat -- no secure writes.
+-- The gold border marks the offered aura, matched on the option's own step --
+-- its index into the castable list -- and NOT on its position in the panel.
+-- The two part company as soon as the resistance row splits the list: the
+-- panel shows the non-resist auras first, so option 4 is whatever follows the
+-- resistances, and the border was landing three icons early.
 local function UpdateAuraMenu(btn)
     local menu = btn.auraMenu
     if not menu then return end
     local step = btn:GetAttribute("astep") or 1
     local running = btn.activeName
-    for i, option in ipairs(menu.options) do
+    for _, option in ipairs(menu.options) do
         if option:IsShown() then
             option.icon:SetDesaturated(option.aura.name ~= running)
-            if i == step then
+            if option.step == step then
                 option.border:SetColorTexture(1, 0.82, 0.2, 1)
             else
                 option.border:SetColorTexture(0, 0, 0, 0.9)
@@ -1197,12 +1485,16 @@ local function CreateAuraMenu(btn)
     local headerBg = menu:CreateTexture(nil, "ARTWORK")
     headerBg:SetPoint("TOPLEFT", INSET, -INSET)
     headerBg:SetPoint("TOPRIGHT", -INSET, -INSET)
-    headerBg:SetHeight(PLAYER_HEADER_H)
+    headerBg:SetHeight(AURA_HEADER_H)
     headerBg:SetColorTexture(0.09, 0.09, 0.11, 1)
 
+    -- One line, because there is only one thing to say now: every icon here
+    -- both swaps and casts, and so does the swapper itself. Centred in a strip
+    -- cut down to fit it, rather than hung from the top of the player menus'
+    -- two-line one.
     local clickHint = menu:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    clickHint:SetPoint("TOPLEFT", headerBg, "TOPLEFT", 4, -2)
-    clickHint:SetText("Left-click = cast shown aura\nClick an icon = swap aura")
+    clickHint:SetPoint("LEFT", headerBg, "LEFT", AURA_PAD, 0)
+    clickHint:SetText("Left-click = Swap + Cast")
     clickHint:SetTextColor(0.4, 0.7, 1)
     clickHint:SetJustifyH("LEFT")
 
@@ -1223,11 +1515,25 @@ local function CreateAuraMenuLabel(menu, index)
     return label
 end
 
+-- Picking an aura casts it as well as selecting it: the click you make to
+-- choose one is the click that puts it up, and having to press the swapper
+-- again afterwards was a second step for something you had already asked for.
+-- That makes every option a cast button in its own right, hence the action
+-- template and both click edges (secure buttons obey ActionButtonUseKeyDown;
+-- an up-only registration never fires on a client set to act on key down).
+--
+-- The templates are the class buttons' pairing, and the order is load-bearing:
+-- SecureHandlerClickTemplate owns an OnClick of its own, so listing it after
+-- the action template REPLACES SecureActionButton_OnClick and the button
+-- silently stops casting -- which is exactly what happened here. State carries
+-- the same handler machinery (Execute/WrapScript/frame refs) and hooks no
+-- OnClick, so the action handler survives and the wrap still lands on it.
 local function CreateAuraOption(menu, index)
     local option = CreateFrame("Button", menu:GetName() .. "Option" .. index, menu,
-        "SecureHandlerClickTemplate")
+        "SecureHandlerStateTemplate, SecureActionButtonTemplate")
     option:SetSize(BTN_SIZE, BTN_SIZE)
-    option:RegisterForClicks("AnyUp")
+    option:RegisterForClicks("AnyUp", "AnyDown")
+    option:SetAttribute("type1", "macro")
 
     local border = option:CreateTexture(nil, "BACKGROUND")
     border:SetPoint("TOPLEFT", -1, 1)
@@ -1265,21 +1571,30 @@ local function CreateAuraOption(menu, index)
         GameTooltip:Show()
     end)
     option:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    -- The pick lands inside AURA_OPTION_SNIPPET; insecure code only persists it
-    -- and repaints, exactly as the old right-click rotation did.
-    option:SetScript("PostClick", function(self)
+    -- The pick lands inside AURA_OPTION_SNIPPET and the cast in the button's
+    -- own macro; insecure code only persists it and repaints, exactly as the
+    -- old right-click rotation did.
+    option:SetScript("PostClick", function(self, _, down)
+        -- Both click edges are registered above, so this fires twice; one pass.
+        if down == true then return end
         local swapper = menu.owner
         if self.aura then
             WhoDoesWhat.db.profile.settings.buffingBarAura = self.aura.key
         end
         UpdateAuraButton(swapper)
+        -- Belt and braces on closing the picker: this runs after the cast has
+        -- already gone out, so out of combat -- where hiding the panel is ours
+        -- to do -- the close doesn't depend on the snippet's `down` reaching
+        -- it. In combat the secure post body is the only one that may.
+        if not InCombatLockdown() then menu:Hide() end
         if WhoDoesWhat.db.profile.settings.logBuffingBarClicks then
             WhoDoesWhat:Print("Buffing bar aura picked: "
                 .. (self.aura and self.aura.name or "nothing") .. ".")
         end
     end)
     SecureHandlerSetFrameRef(option, "auraButton", menu.owner)
-    option:WrapScript(option, "OnClick", AURA_OPTION_SNIPPET)
+    option:WrapScript(option, "OnClick", AURA_OPTION_SNIPPET,
+        AURA_OPTION_POST_SNIPPET)
     menu.options[index] = option
     return option
 end
@@ -1298,11 +1613,13 @@ local function ConfigureAuraMenu(btn)
         row.auras[#row.auras + 1] = { step = i, aura = aura }
     end
 
-    -- Floor the panel at the player menus' width so the shared header hint has
-    -- the room it has over there; the icon rows are narrower than that anyway.
+    -- Floor the panel at the player menus' width so the header hint has room;
+    -- the icon rows are narrower than that anyway, which is where the padding
+    -- below comes from -- it insets the contents rather than widening the
+    -- panel, and only a row that outgrows the floor pushes past it.
     local shown, rowCount = 0, 0
     local widest = PLAYER_MENU_W - INSET * 2
-    local y = INSET + PLAYER_HEADER_H + PLAYER_GAP
+    local y = INSET + AURA_HEADER_H + AURA_PAD
     for _, row in ipairs(rows) do
         if #row.auras > 0 then
             rowCount = rowCount + 1
@@ -1310,7 +1627,7 @@ local function ConfigureAuraMenu(btn)
             local label = menu.labels[rowCount] or CreateAuraMenuLabel(menu, rowCount)
             label:SetText(row.label)
             label:ClearAllPoints()
-            label:SetPoint("TOPLEFT", menu, "TOPLEFT", INSET, -y)
+            label:SetPoint("TOPLEFT", menu, "TOPLEFT", INSET + AURA_PAD, -y)
             label:Show()
             y = y + AURA_MENU_LABEL_H
             for column, entry in ipairs(row.auras) do
@@ -1323,28 +1640,38 @@ local function ConfigureAuraMenu(btn)
                 option.spellId = select(7, GetSpellInfo(entry.aura.name))
                     or entry.aura.spellId
                 option.icon:SetTexture(entry.aura.icon)
+                option.step = entry.step
                 option:SetAttribute("astep", entry.step)
-                option:SetAttribute("auraMacro", "/cast " .. entry.aura.name)
+                -- One macro, two jobs: the option casts it on click, and the
+                -- snippet hands the same string to the swapper as its new
+                -- offering.
+                local macro = "/cast " .. entry.aura.name
+                option:SetAttribute("auraMacro", macro)
+                option:SetAttribute("macrotext1", macro)
                 option:ClearAllPoints()
                 option:SetPoint("TOPLEFT", menu, "TOPLEFT",
-                    INSET + (column - 1) * (BTN_SIZE + BTN_GAP), -y)
+                    INSET + AURA_PAD + (column - 1) * (BTN_SIZE + BTN_GAP), -y)
                 option:Show()
             end
-            -- Widen for a caption that outruns its own row of icons.
+            -- Widen for a caption that outruns its own row of icons. Both
+            -- candidates carry the padding on each side, so a row that does
+            -- push past the floor still isn't flush against the edge.
             widest = math.max(widest,
-                #row.auras * BTN_SIZE + (#row.auras - 1) * BTN_GAP,
-                math.ceil(label:GetStringWidth()))
+                #row.auras * BTN_SIZE + (#row.auras - 1) * BTN_GAP
+                    + AURA_PAD * 2,
+                math.ceil(label:GetStringWidth()) + AURA_PAD * 2)
             y = y + BTN_SIZE
         end
     end
     for i = shown + 1, #menu.options do
         menu.options[i]:Hide()
         menu.options[i].aura, menu.options[i].spellId = nil, nil
+        menu.options[i].step = nil
     end
     for i = rowCount + 1, #menu.labels do menu.labels[i]:Hide() end
 
     menu:SetAttribute("Display", shown > 0 and 1 or 0)
-    menu:SetSize(INSET * 2 + widest, y + INSET)
+    menu:SetSize(INSET * 2 + widest, y + AURA_PAD + INSET)
     menu:Hide()
 end
 
@@ -1352,12 +1679,8 @@ end
 -- out, since which way it opens is read off its on-screen position.
 local function PositionAuraMenu(btn)
     local menu = btn.auraMenu
-    menu:ClearAllPoints()
-    if PopoutDirection(btn, menu:GetHeight()) == "UP" then
-        menu:SetPoint("BOTTOMLEFT", btn, "TOPLEFT", 0, 0)
-    else
-        menu:SetPoint("TOPLEFT", btn, "BOTTOMLEFT", 0, 0)
-    end
+    AnchorPopout(menu, btn,
+        PopoutDirection(btn, menu:GetWidth(), menu:GetHeight()))
 end
 
 -- No tooltip of its own: the picker opens on hover in its place, and says
@@ -1503,15 +1826,7 @@ local function EnsureBar()
     bar:SetFrameStrata("MEDIUM")
     bar:SetClampedToScreen(true)
     bar:SetMovable(true)
-    -- Match the other WDW windows: dark fill, thin tooltip border.
-    bar:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = false, edgeSize = 16,
-        insets = { left = INSET, right = INSET, top = INSET, bottom = INSET },
-    })
-    bar:SetBackdropColor(0, 0, 0, 0.95)
-    bar:SetBackdropBorderColor(0.4, 0.4, 0.4)
+    ApplyBackdrop(BAR_EDGE)
     AttachAltDrag(bar)
 
     -- Source-aware title strip, also a drag handle; hover explains Alt-drag.
@@ -1525,6 +1840,9 @@ local function EnsureBar()
     local titleText = title:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     titleText:SetPoint("LEFT", 5, 0)
     titleText:SetText("Paladin Bar")
+    -- Kept so a column can drop a couple of points off this same face and the
+    -- row can put it straight back.
+    bar.titleFont, bar.titleFontSize, bar.titleFontFlags = titleText:GetFont()
 
     -- The source token rides the far end of the strip, a size down and greyed,
     -- so the bar's name reads first and the source is a glance rather than a
@@ -1543,14 +1861,39 @@ local function EnsureBar()
     title.tooltipAnchor = bar
     title.FillTooltip = function()
         GameTooltip:SetText("Paladin Bar", 1, 1, 1)
+        -- Test mode renders somebody else's jobs, and everything downstream
+        -- follows them -- which class buttons appear, and whether the Righteous
+        -- Fury button does, since that reads the RENDERED paladin's tank role.
+        -- A fake raid can quietly hand the preview to a paladin who isn't a
+        -- tank, and a button vanishing then reads as a bug rather than as the
+        -- preview doing its job. So the tooltip says whose bar this is.
+        if WhoDoesWhat.db.profile.settings.buffingBarTestMode then
+            local previewing = WhoDoesWhat:GetBuffingBarTestPaladin()
+            GameTooltip:AddLine("|T" .. WhoDoesWhat.WARNING_ICON .. ":14:14:0:0|t"
+                .. " Previewing Bar for: "
+                .. (previewing and WhoDoesWhat:DisplayName(previewing)
+                    or "nobody"),
+                1, 0.25, 0.25, true)
+        end
         GameTooltip:AddLine(
             WhoDoesWhat.db.profile.settings.pallyBuffSource == "pallypower"
                 and "Buffing data is powered by PallyPower assignments."
                 or "Buffing data is powered by WDW.",
             0.6, 0.6, 0.6, true)
+        if WhoDoesWhat:PallyPowerIsEnabled() then
+            GameTooltip:AddLine("PallyPower is switched on, so this bar has"
+                .. " stood down to stay out of its way.", 1, 0.25, 0.25, true)
+        end
         GameTooltip:AddLine(" ")
         GameTooltip:AddDoubleLine("Alt-Drag:", "Move",
             1, 0.82, 0, 1, 1, 1)
+        -- The switch, and then a gap: it belongs with the move as something
+        -- that acts on the bar itself, not with the two that open a window.
+        if WhoDoesWhat:PallyPowerInstalled() then
+            GameTooltip:AddDoubleLine("Alt-Right-Click:", "Toggle PallyPower",
+                1, 0.82, 0, 1, 1, 1)
+            GameTooltip:AddLine(" ")
+        end
         GameTooltip:AddDoubleLine("Shift-Left-Click:", "Buffing Grid",
             1, 0.82, 0, 1, 1, 1)
         GameTooltip:AddDoubleLine("Shift-Right-Click:", "Paladin Bar Settings",
@@ -1559,6 +1902,16 @@ local function EnsureBar()
     title:SetScript("OnEnter", ShowBarTooltip)
     title:SetScript("OnLeave", function() GameTooltip:Hide() end)
     title:SetScript("OnMouseUp", function(_, button)
+        -- Alt is the bar's own modifier (it drags), so the switch rides it too.
+        -- Silent without PallyPower: there is nothing to toggle, and the
+        -- tooltip doesn't offer it either.
+        if IsAltKeyDown() then
+            if button == "RightButton" and WhoDoesWhat:PallyPowerInstalled() then
+                WhoDoesWhat:TogglePallyPower()
+                RefreshBarTooltip(title)
+            end
+            return
+        end
         if not IsShiftKeyDown() then return end
         if button == "RightButton" then
             WhoDoesWhat:OpenAddonSettingsView("Paladin Bar")
@@ -1626,6 +1979,9 @@ local function EnsureBar()
                 local ready = JobIsReady(job, nameToUnit)
                 btn.icon:SetDesaturated(not ready)
                 SetButtonGlow(btn, ready)
+                -- The countdown is the one thing here that changes without an
+                -- event to hang it on, so it rides this tick.
+                UpdateJobTimer(btn)
                 if btn.playerMenu:IsShown() then
                     for _, p in ipairs(btn.playerButtons) do
                         if p:IsShown() then UpdatePlayerAura(p) end
@@ -1643,6 +1999,95 @@ end
 -- Refresh + visibility
 -- ---------------------------------------------------------------------------
 
+-- Buttons are laid out by how far along the bar's axis they sit, so the row and
+-- the column share one set of offsets and only these two helpers know which way
+-- that axis runs. The cross axis is always the top-left corner of the content
+-- area, which is where the text slots go: a row hangs each one under its icon,
+-- in height it is already paying for, while a column has no room for that and
+-- stays exactly one icon wide.
+local function PlaceButton(region, offset)
+    region:ClearAllPoints()
+    if Vertical() then
+        region:SetPoint("TOPLEFT", bar, "TOPLEFT", INSET + PAD,
+            -(CONTENT_TOP + offset))
+    else
+        region:SetPoint("TOPLEFT", bar, "TOPLEFT", INSET + PAD + offset,
+            -CONTENT_TOP)
+    end
+end
+
+-- So in a column the class buttons' x/y counts drop out -- the coverage is a
+-- hover away in the player menu's header -- while a countdown, which is the one
+-- thing here worth reading at a glance, moves ON to its icon, outlined, the way
+-- the shout bar's does. Only the self-buff buttons pass keepInColumn.
+local function AnchorCount(btn, keepInColumn)
+    local count = btn.count
+    count:ClearAllPoints()
+    if not Vertical() then
+        count:SetFontObject(GameFontNormalSmall)
+        count:SetPoint("TOP", btn, "BOTTOM", 0, -1)
+        count:Show()
+    elseif keepInColumn then
+        -- Small enough for a "9:59" to sit inside a 28px icon, outlined so it
+        -- reads over one; the face follows whatever the client is using.
+        local font = GameFontNormal:GetFont()
+        count:SetFont(font or "Fonts\\FRIZQT__.TTF", 13, "OUTLINE")
+        count:SetPoint("CENTER", btn, "CENTER", 0, 0)
+        count:Show()
+    else
+        count:Hide()
+    end
+end
+
+-- PallyPower's own bar does this job whenever its master switch is on, so ours
+-- stands down rather than sitting beside it as a second, contradictory set of
+-- blessing buttons. Everything but the title strip goes, leaving a red-lettered
+-- handle that says why and carries the way back (Alt-Right-Click on it). Only
+-- reachable with PallyPower installed, so a paladin without it never lands
+-- here, and only out of combat, where hiding secure buttons is allowed.
+local function CollapseForPallyPower()
+    for _, btn in ipairs(bar.buttons) do
+        SetButtonGlow(btn, false)
+        btn.playerMenu:SetAttribute("Display", 0)
+        btn.playerMenu:Hide()
+        btn:Hide()
+        btn.job, btn.visualJob = nil, nil
+    end
+    SetButtonGlow(bar.ppButton, false)
+    bar.ppButton:Hide()
+    SetButtonGlow(bar.auraButton, false)
+    bar.auraButton.auraMenu:Hide()
+    bar.auraButton:Hide()
+    SetButtonGlow(bar.rfButton, false)
+    bar.rfButton:Hide()
+    bar.divider:Hide()
+    bar.hint:Hide()
+    -- A column keeps its width so the strip doesn't jump around when the switch
+    -- flips; a row shrinks to the words it is still showing.
+    local width = INSET * 2 + PAD * 2
+    if Vertical() then
+        width = width + BTN_SIZE
+    else
+        width = width + math.ceil(bar.titleText:GetStringWidth()
+            + bar.sourceText:GetStringWidth()) + 16
+    end
+    -- Exactly the strip, not CONTENT_TOP: that carries the 2px the button row
+    -- would have started after, which with nothing under it read as a thin
+    -- black line of leftover window body below the title.
+    ApplyBackdrop(COLLAPSED_EDGE)
+    bar:SetSize(width, INSET * 2 + TITLE_H)
+end
+
+-- Has this class got anything left to say? Somebody still without their
+-- blessing, or a countdown running on the first one due to lapse. A warning is
+-- work, so a class showing one is not finished no matter what its count reads
+-- -- which is what keeps a class from hiding on the way out and reappearing
+-- seconds later with its blessing gone.
+local function JobIsDone(job)
+    if job.covered < job.total then return false end
+    return not (job.soonest and job.soonest < WarnSeconds())
+end
+
 -- Repaint the bar's buttons from the resolved paladin's jobs. Only touches the
 -- widgets; visibility is handled by UpdatePaladinBuffingBarVisibility.
 function WhoDoesWhat:RefreshPaladinBuffingBar()
@@ -1650,15 +2095,54 @@ function WhoDoesWhat:RefreshPaladinBuffingBar()
     local paladin = ResolveBarPaladin()
     local buffPlan = self.Assign.GetActivePaladinBuffPlan()
     local allJobs = paladin and self.Assign.GetPaladinBuffJobs(paladin, buffPlan) or {}
-    -- Drop classes with no real raiders to buff (read 0/0) -- nothing to show.
-    local jobs = {}
+    -- Drop classes with no real raiders to buff (read 0/0) -- nothing to show --
+    -- and, if asked, the ones with nothing left to do, leaving a bar that is
+    -- only the work still outstanding. A class comes back the moment its
+    -- blessing runs down into the warning window, though not until combat ends:
+    -- adding a button is a layout change.
+    local hideCompleted = self.db.profile.settings.buffingBarHideCompleted
+    local jobs, hidden = {}, 0
     for _, job in ipairs(allJobs) do
-        if job.total > 0 then jobs[#jobs + 1] = job end
+        if job.total > 0 then
+            if hideCompleted and JobIsDone(job) then
+                hidden = hidden + 1
+            else
+                jobs[#jobs + 1] = job
+            end
+        end
     end
     local nameToUnit = BuildNameToUnit()
     local pallyPowerMode = self.db.profile.settings.pallyBuffSource == "pallypower"
-    bar.sourceText:SetText(pallyPowerMode and SOURCE_LABELS.pallypower
-        or SOURCE_LABELS.wdw)
+    local sourceLabel = pallyPowerMode and SOURCE_LABELS.pallypower
+        or SOURCE_LABELS.wdw
+    local vertical = Vertical()
+    -- A column is one button wide, so its strip drops the name and centres the
+    -- source token -- the part that changes -- in the space that leaves. A
+    -- point smaller as well: at full size a "WDW" was wider than a button and
+    -- the whole bar had to widen around it, which is why the same column looked
+    -- thinner in PP mode. Sizing the token to the strip instead of the strip to
+    -- the token keeps every column exactly one icon wide whatever it says --
+    -- one point down is as far as that has to go, and two was hard to read.
+    bar.titleText:SetText(vertical and sourceLabel or "Paladin Bar")
+    bar.sourceText:SetText(vertical and "" or sourceLabel)
+    -- Red is the whole tell in the collapsed state: the strip is all that's
+    -- left of the bar, so it has to carry "this is off on purpose".
+    local ppRunning = self:PallyPowerIsEnabled()
+    if ppRunning then
+        bar.titleText:SetTextColor(1, 0.25, 0.25)
+    else
+        bar.titleText:SetTextColor(1, 0.82, 0)
+    end
+    bar.titleText:ClearAllPoints()
+    if vertical then
+        bar.titleText:SetFont(bar.titleFont, bar.titleFontSize - 1,
+            bar.titleFontFlags)
+        bar.titleText:SetPoint("CENTER", bar.title, "CENTER", 0, 0)
+    else
+        bar.titleText:SetFont(bar.titleFont, bar.titleFontSize,
+            bar.titleFontFlags)
+        bar.titleText:SetPoint("LEFT", bar.title, "LEFT", 5, 0)
+    end
 
     -- Existing secure buttons may repaint in combat, but cannot be created,
     -- shown, hidden, moved, or assigned new spells/targets. Match by class so
@@ -1679,6 +2163,14 @@ function WhoDoesWhat:RefreshPaladinBuffingBar()
             UpdatePallyPowerButton(bar.ppButton, paladin, buffPlan)
         end
         UpdateSelfBuffButtons()
+        return
+    end
+
+    -- Below the combat branch on purpose: standing down empties the bar, and
+    -- emptying it is a layout change like any other.
+    if ppRunning then
+        CollapseForPallyPower()
+        if not bar.moving then LoadPosition() end
         return
     end
 
@@ -1703,15 +2195,14 @@ function WhoDoesWhat:RefreshPaladinBuffingBar()
         leadW = #selfBuffs * BTN_SIZE + (#selfBuffs - 1) * BTN_GAP
     end
     for i, btn in ipairs(selfBuffs) do
-        btn:ClearAllPoints()
-        btn:SetPoint("TOPLEFT", bar, "TOPLEFT",
-            INSET + PAD + (i - 1) * (BTN_SIZE + BTN_GAP), -CONTENT_TOP)
+        AnchorCount(btn, true)
+        PlaceButton(btn, (i - 1) * (BTN_SIZE + BTN_GAP))
         btn:Show()
     end
     UpdateSelfBuffButtons()
 
     -- Class buttons start past the self-buff block and its divider gap.
-    local classX = INSET + PAD + leadW + (leadW > 0 and DIVIDER_GAP or 0)
+    local classStart = leadW + (leadW > 0 and DIVIDER_GAP or 0)
     for i, job in ipairs(jobs) do
         local btn = bar.buttons[i]
         if not btn then
@@ -1721,9 +2212,8 @@ function WhoDoesWhat:RefreshPaladinBuffingBar()
         ConfigureButtonCast(btn, job, nameToUnit)
         ConfigurePlayerMenu(btn, job, nameToUnit)
         UpdateButtonStatus(btn, job, nameToUnit)
-        btn:ClearAllPoints()
-        btn:SetPoint("TOPLEFT", bar, "TOPLEFT",
-            classX + (i - 1) * (BTN_SIZE + BTN_GAP), -CONTENT_TOP)
+        AnchorCount(btn)
+        PlaceButton(btn, classStart + (i - 1) * (BTN_SIZE + BTN_GAP))
         btn:Show()
     end
     for i = #jobs + 1, #bar.buttons do
@@ -1735,12 +2225,17 @@ function WhoDoesWhat:RefreshPaladinBuffingBar()
         bar.buttons[i].visualJob = nil
     end
 
+    -- The gear is a complaint -- these classes have no PallyPower assignment --
+    -- so with nothing to complain about it earns no space on the bar.
     local n = #jobs
+    local ppShown = false
     if pallyPowerMode then
         UpdatePallyPowerButton(bar.ppButton, paladin, buffPlan)
-        bar.ppButton:ClearAllPoints()
-        bar.ppButton:SetPoint("TOPLEFT", bar, "TOPLEFT",
-            classX + n * (BTN_SIZE + BTN_GAP), -CONTENT_TOP)
+        ppShown = (bar.ppButton.unassignedCount or 0) > 0
+    end
+    if ppShown then
+        AnchorCount(bar.ppButton)
+        PlaceButton(bar.ppButton, classStart + n * (BTN_SIZE + BTN_GAP))
         bar.ppButton:Show()
     else
         SetButtonGlow(bar.ppButton, false)
@@ -1748,13 +2243,13 @@ function WhoDoesWhat:RefreshPaladinBuffingBar()
     end
 
     -- The divider only earns its place when there is a class row on the other
-    -- side of it.
-    local classCount = n + (pallyPowerMode and 1 or 0)
+    -- side of it. It lies across the bar, so it turns with everything else.
+    local classCount = n + (ppShown and 1 or 0)
     bar.divider:SetShown(leadW > 0 and classCount > 0)
     if bar.divider:IsShown() then
-        bar.divider:ClearAllPoints()
-        bar.divider:SetPoint("TOPLEFT", bar, "TOPLEFT",
-            INSET + PAD + leadW + (DIVIDER_GAP - DIVIDER_W) / 2, -CONTENT_TOP)
+        bar.divider:SetSize(vertical and BTN_SIZE or DIVIDER_W,
+            vertical and DIVIDER_W or BTN_SIZE)
+        PlaceButton(bar.divider, leadW + (DIVIDER_GAP - DIVIDER_W) / 2)
     end
 
     local classW = 0
@@ -1762,12 +2257,23 @@ function WhoDoesWhat:RefreshPaladinBuffingBar()
         classW = classCount * BTN_SIZE + (classCount - 1) * BTN_GAP
             + (leadW > 0 and DIVIDER_GAP or 0)
     end
+    ApplyBackdrop(BAR_EDGE)
     bar.hint:SetShown(leadW + classW == 0)
     if leadW + classW == 0 then
-        bar.hint:SetText(paladin
-            and (paladin .. " has no assigned blessings.")
+        -- The empty state is a sentence either way, so it keeps the row's shape
+        -- rather than wrapping into a column one word wide. An empty bar means
+        -- something different once completed classes are being hidden: the work
+        -- is done, not missing.
+        bar.hint:SetText((hidden > 0 and "All assigned blessings are up.")
+            or (paladin and (paladin .. " has no assigned blessings."))
             or "No Paladin selected for testing.")
         bar:SetSize(200, CONTENT_TOP + 18 + INSET)
+    elseif vertical then
+        -- Exactly one icon wide, with nothing left to pad it out past them: no
+        -- counts, and a source token sized to fit the strip rather than the
+        -- strip sized to fit it.
+        bar:SetSize(INSET * 2 + PAD * 2 + BTN_SIZE,
+            CONTENT_TOP + leadW + classW + INSET + 1)
     else
         local minW = MIN_BUTTONS_WIDE * BTN_SIZE + (MIN_BUTTONS_WIDE - 1) * BTN_GAP
         -- The strip carries a name at one end and a source token at the other,
@@ -1804,9 +2310,17 @@ end
 
 -- Bring the bar up immediately on login/reload if it was left enabled, then
 -- repaint once more after the roster and synced plan have had time to arrive.
+--
+-- SPELLS_CHANGED is the respec/level-up signal: it retires the remembered
+-- talent answers behind the aura list. It lives on the loader rather than the
+-- bar's own frame because the bar's handler is gated on being shown, and a
+-- paladin who respecs with the bar hidden would come back to a stale list.
 local loader = CreateFrame("Frame")
 loader:RegisterEvent("PLAYER_ENTERING_WORLD")
-loader:SetScript("OnEvent", function()
+loader:RegisterEvent("SPELLS_CHANGED")
+loader:SetScript("OnEvent", function(_, event)
+    ClearTalentAuraCache()
     WhoDoesWhat:UpdatePaladinBuffingBarVisibility()
+    if event ~= "PLAYER_ENTERING_WORLD" then return end
     C_Timer.After(2, function() WhoDoesWhat:UpdatePaladinBuffingBarVisibility() end)
 end)

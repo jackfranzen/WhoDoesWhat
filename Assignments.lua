@@ -2514,7 +2514,8 @@ end
 --   { classInfo, greaterKey, greaterBuff, hasPets, hasNonPets,
 --     normals  = { { name, key, buff, isPet, petUnit }, ... },  -- right-click
 --     raiders  = { { name, key, has, isGreater, classInfo, isPet, owner, petUnit }, ... },
---     total, covered }
+--     total, covered,
+--     soonest }  -- seconds until the first covered member loses it, or nil
 local function GetPaladinBuffJobs(paladinName, buffPlan)
     local canonical = WhoDoesWhat.CanonicalBuffOrder
     local canonIndex = {}
@@ -2593,7 +2594,16 @@ local function GetPaladinBuffJobs(paladinName, buffPlan)
                 classInfo = m.classInfo,
             }
             job.total = job.total + 1
-            if has == true then job.covered = job.covered + 1 end
+            if has == true then
+                job.covered = job.covered + 1
+                -- Whoever loses their blessing first is when this class next
+                -- needs a cast, so that is the only duration worth a number.
+                -- Free here: the same loop already asked about every member.
+                local remaining = WhoDoesWhat:GetBuffTimeRemaining(m.statusName, m.key)
+                if remaining and (not job.soonest or remaining < job.soonest) then
+                    job.soonest = remaining
+                end
+            end
             if m.key ~= greaterKey then
                 job.normals[#job.normals + 1] = {
                     name = m.display, key = m.key, buff = WhoDoesWhat.PaladinBuffs[m.key],

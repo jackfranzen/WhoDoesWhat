@@ -61,6 +61,40 @@ function WhoDoesWhat:PaladinHasPallyPower(name)
     return self.pallyPowerPeers[name] == true
 end
 
+-- PallyPower's own master switch -- the "Enable PallyPower" checkbox at the top
+-- of its options. Installed and switched on means its bar is the one doing this
+-- job, which is what lets ours stand down instead of offering a second, rival
+-- set of blessing buttons.
+function WhoDoesWhat:PallyPowerInstalled()
+    return _G.PallyPower ~= nil
+end
+
+function WhoDoesWhat:PallyPowerIsEnabled()
+    local pp = _G.PallyPower
+    return (pp and pp.opt and pp.opt.enabled) and true or false
+end
+
+-- Flip that switch, doing exactly what its options panel's own setter does:
+-- the flag, then the addon's matching enable or disable pass. Combat-guarded,
+-- because that pass shows and hides PallyPower's secure buttons -- the same
+-- reason our own bar defers its layout until the fight is over.
+function WhoDoesWhat:TogglePallyPower()
+    local pp = _G.PallyPower
+    if not (pp and pp.opt) then
+        self:Print("PallyPower is not installed.")
+        return
+    end
+    if InCombatLockdown() then
+        self:Print("PallyPower cannot be switched on or off during combat.")
+        return
+    end
+    local enabled = not pp.opt.enabled
+    pp.opt.enabled = enabled
+    if enabled then pp:OnEnable() else pp:OnDisable() end
+    -- No chat line: both bars appear or vanish on the spot, which says it.
+    self:UpdatePaladinBuffingBarVisibility()
+end
+
 -- Ask PallyPower clients to identify themselves. Each paladin answers REQ
 -- with SELF + ASELF; CHAT_MSG_ADDON below records those replies for raider
 -- tooltips.

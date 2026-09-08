@@ -1654,61 +1654,130 @@ local function EnsureSettingsFrame()
             WhoDoesWhat:RefreshPaladinBuffingBar()
         end)
 
-    local growLabel = paladinPage:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    growLabel:SetPoint("TOPLEFT", CONTENT_X + 4, -(yL + 4))
-    growLabel:SetText("Bar grows:")
-    local growLabels = { RIGHT = "Right", LEFT = "Left", CENTER = "From Center" }
-    f.buffingGrowLabels = growLabels
-    local growDD = CreateFrame("Frame", "WhoDoesWhatBuffingGrowDD", paladinPage, "UIDropDownMenuTemplate")
-    growDD:SetPoint("LEFT", growLabel, "RIGHT", -6, -2)
-    UIDropDownMenu_SetWidth(growDD, 90)
-    WhoDoesWhat:StyleDropdown(growDD, true)
-    UIDropDownMenu_Initialize(growDD, function(_, level)
-        local saved = WhoDoesWhat.db.profile.settings.buffingBarGrow or "RIGHT"
-        for _, mode in ipairs({ "RIGHT", "LEFT", "CENTER" }) do
+    f.buffingHideCompletedCheck, yL = AddCompactCheckboxRow(paladinPage, CONTENT_X, yL,
+        "Hide completed classes",
+        "Drop a class button off the bar while everyone it covers is buffed, so the bar shows only what's left to do. Buttons come back as blessings lapse, though adding or removing one has to wait until you leave combat.",
+        function(value)
+            WhoDoesWhat.db.profile.settings.buffingBarHideCompleted = value
+            WhoDoesWhat:LogUiBuilding("Buffing bar completed-class hiding "
+                .. (value and "enabled." or "disabled."))
+            WhoDoesWhat:RefreshPaladinBuffingBar()
+        end)
+
+    -- Three linked dropdowns. The orientation decides which axis the other two
+    -- speak, so both of their option lists (and the text on their buttons) are
+    -- read off it rather than fixed; the view translates the saved choices when
+    -- the bar turns, so nothing here has to.
+    local ORIENT_LABELS = { HORIZONTAL = "Horizontal", VERTICAL = "Vertical" }
+    local GROW_LABELS = { RIGHT = "Right", LEFT = "Left", DOWN = "Down",
+        UP = "Up", CENTER = "From Center" }
+    local BAR_GROW_MODES = { HORIZONTAL = { "RIGHT", "LEFT", "CENTER" },
+        VERTICAL = { "DOWN", "UP", "CENTER" } }
+    local MENU_GROW_MODES = { HORIZONTAL = { "DOWN", "UP" },
+        VERTICAL = { "RIGHT", "LEFT" } }
+    local function BuffingAxis()
+        return WhoDoesWhat.db.profile.settings.buffingBarOrientation == "VERTICAL"
+            and "VERTICAL" or "HORIZONTAL"
+    end
+
+    local function AddBuffingDropdown(name, text, dy, width)
+        local label = paladinPage:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        label:SetPoint("TOPLEFT", CONTENT_X + 4, -(yL + dy))
+        label:SetText(text)
+        local dd = CreateFrame("Frame", name, paladinPage, "UIDropDownMenuTemplate")
+        dd:SetPoint("LEFT", label, "RIGHT", -6, -2)
+        UIDropDownMenu_SetWidth(dd, width)
+        WhoDoesWhat:StyleDropdown(dd, true)
+        return dd
+    end
+
+    local orientDD = AddBuffingDropdown("WhoDoesWhatBuffingOrientDD",
+        "Bar layout:", 4, 90)
+    local growDD = AddBuffingDropdown("WhoDoesWhatBuffingGrowDD",
+        "Bar grows:", 34, 90)
+    local menuGrowDD = AddBuffingDropdown("WhoDoesWhatBuffingMenuGrowDD",
+        "Player menu grows:", 64, 80)
+
+    -- Re-label all three from the DB: the orientation dropdown changes what the
+    -- other two are showing, and so does loading a different profile.
+    local function RefreshBuffingLayout()
+        UIDropDownMenu_SetText(orientDD, ORIENT_LABELS[BuffingAxis()])
+        UIDropDownMenu_SetText(growDD, GROW_LABELS[WhoDoesWhat:GetBuffingBarGrow()])
+        UIDropDownMenu_SetText(menuGrowDD,
+            GROW_LABELS[WhoDoesWhat:GetBuffingMenuGrow()])
+    end
+    f.RefreshBuffingLayout = RefreshBuffingLayout
+
+    UIDropDownMenu_Initialize(orientDD, function(_, level)
+        local saved = BuffingAxis()
+        for _, mode in ipairs({ "HORIZONTAL", "VERTICAL" }) do
             local info = UIDropDownMenu_CreateInfo()
-            info.text = growLabels[mode]
+            info.text = ORIENT_LABELS[mode]
+            info.checked = (saved == mode)
+            info.func = function()
+                WhoDoesWhat:SetBuffingBarOrientation(mode)
+                RefreshBuffingLayout()
+            end
+            UIDropDownMenu_AddButton(info, level)
+        end
+    end)
+    f.buffingOrientDD = orientDD
+
+    UIDropDownMenu_Initialize(growDD, function(_, level)
+        local saved = WhoDoesWhat:GetBuffingBarGrow()
+        for _, mode in ipairs(BAR_GROW_MODES[BuffingAxis()]) do
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = GROW_LABELS[mode]
             info.checked = (saved == mode)
             info.func = function()
                 WhoDoesWhat:SetBuffingBarGrow(mode)
-                UIDropDownMenu_SetText(growDD, growLabels[mode])
+                UIDropDownMenu_SetText(growDD, GROW_LABELS[mode])
             end
             UIDropDownMenu_AddButton(info, level)
         end
     end)
     f.buffingGrowDD = growDD
 
-    local menuGrowLabel = paladinPage:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    menuGrowLabel:SetPoint("TOPLEFT", CONTENT_X + 4, -(yL + 34))
-    menuGrowLabel:SetText("Player menu grows:")
-    local menuGrowLabels = { DOWN = "Down", UP = "Up" }
-    local menuGrowDD = CreateFrame("Frame", "WhoDoesWhatBuffingMenuGrowDD", paladinPage,
-        "UIDropDownMenuTemplate")
-    menuGrowDD:SetPoint("LEFT", menuGrowLabel, "RIGHT", -6, -2)
-    UIDropDownMenu_SetWidth(menuGrowDD, 80)
-    WhoDoesWhat:StyleDropdown(menuGrowDD, true)
     UIDropDownMenu_Initialize(menuGrowDD, function(_, level)
-        local saved = WhoDoesWhat.db.profile.settings.buffingMenuGrow or "DOWN"
-        for _, mode in ipairs({ "DOWN", "UP" }) do
+        local saved = WhoDoesWhat:GetBuffingMenuGrow()
+        for _, mode in ipairs(MENU_GROW_MODES[BuffingAxis()]) do
             local info = UIDropDownMenu_CreateInfo()
-            info.text = menuGrowLabels[mode]
+            info.text = GROW_LABELS[mode]
             info.checked = (saved == mode)
             info.func = function()
                 WhoDoesWhat:SetBuffingMenuGrow(mode)
-                UIDropDownMenu_SetText(menuGrowDD, menuGrowLabels[mode])
+                UIDropDownMenu_SetText(menuGrowDD, GROW_LABELS[mode])
             end
             UIDropDownMenu_AddButton(info, level)
         end
     end)
     f.buffingMenuGrowDD = menuGrowDD
 
-    f.buffingMenuExpiringCheck, yL = AddCompactCheckboxRow(paladinPage, CONTENT_X, yL + 68,
-        "Warn below five minutes",
-        "Color player rows yellow when their active blessing has less than five minutes remaining.",
-        function(value)
-            WhoDoesWhat.db.profile.settings.buffingMenuWarnExpiring = value
-            WhoDoesWhat:RefreshPaladinBuffingBar()
-        end)
+    -- One threshold, two tells: the countdown that appears over a class button
+    -- and the yellow player rows inside it.
+    local warnDD = AddBuffingDropdown("WhoDoesWhatBuffingWarnDD",
+        "Warn below:", 94, 100)
+    local function WarnLabel(minutes)
+        return minutes .. (minutes == 1 and " minute" or " minutes")
+    end
+    UIDropDownMenu_Initialize(warnDD, function(_, level)
+        local saved = WhoDoesWhat:GetBuffingWarnMinutes()
+        for _, minutes in ipairs(WhoDoesWhat.BuffingWarnMinutes) do
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = WarnLabel(minutes)
+            info.checked = (saved == minutes)
+            info.func = function()
+                WhoDoesWhat.db.profile.settings.buffingMenuWarnMinutes = minutes
+                UIDropDownMenu_SetText(warnDD, WarnLabel(minutes))
+                WhoDoesWhat:RefreshPaladinBuffingBar()
+            end
+            UIDropDownMenu_AddButton(info, level)
+        end
+    end)
+    f.buffingWarnDD = warnDD
+    f.RefreshBuffingWarn = function()
+        UIDropDownMenu_SetText(warnDD, WarnLabel(WhoDoesWhat:GetBuffingWarnMinutes()))
+    end
 
     -- ---- Warrior ----
     local warriorPage = pages[5]
@@ -2048,12 +2117,9 @@ function WhoDoesWhat:OpenAddonSettingsView(section)
     local settings = self.db.profile.settings
     f.minimapCheck:SetChecked(not settings.minimapButton.hide)
     f.buffingBarCheck:SetChecked(settings.buffingBarEnabled)
-    UIDropDownMenu_SetText(f.buffingGrowDD,
-        f.buffingGrowLabels[settings.buffingBarGrow or "RIGHT"]
-            or f.buffingGrowLabels.RIGHT)
-    UIDropDownMenu_SetText(f.buffingMenuGrowDD,
-        settings.buffingMenuGrow == "UP" and "Up" or "Down")
-    f.buffingMenuExpiringCheck:SetChecked(settings.buffingMenuWarnExpiring)
+    f.RefreshBuffingLayout()
+    f.buffingHideCompletedCheck:SetChecked(settings.buffingBarHideCompleted)
+    f.RefreshBuffingWarn()
     f.buffingAuraCheck:SetChecked(settings.buffingBarAuraButton ~= false)
     f.buffingRighteousFuryCheck:SetChecked(settings.buffingBarRighteousFury ~= false)
     f.buffingTestCheck:SetChecked(settings.buffingBarTestMode)

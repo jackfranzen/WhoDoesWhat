@@ -276,7 +276,12 @@ WhoDoesWhat.PaladinAuras = {
     { key = "fireResist",    spellId = 19891, name_short = "Fire",   resist = true },
     { key = "frostResist",   spellId = 19888, name_short = "Frost",  resist = true },
     { key = "shadowResist",  spellId = 19876, name_short = "Shadow", resist = true },
-    { key = "sanctity",      spellId = 20218, name_short = "Sanctity" },
+    -- `talent` marks an aura a TALENT grants outright, so a paladin who didn't
+    -- spec for it can't cast it -- and the client's spell database knows its
+    -- name either way, so the buffing bar has to ask the talent tree instead of
+    -- a name lookup. Sanctity Aura is the only one: Concentration Aura is
+    -- trained, and its talent only improves it.
+    { key = "sanctity",      spellId = 20218, name_short = "Sanctity", talent = true },
 }
 if not features.isClassicEra then
     -- Crusader Aura arrived with TBC (level 62, mounted speed).
