@@ -752,10 +752,13 @@ end
 -- away as the window widens. Count comes from the perimeter and the loop time
 -- comes from the perimeter too, which holds the dashes at one speed in pixels
 -- per second whatever the window is doing.
-local SPIN_SPACING = 15
+local SPIN_SPACING = 9
 local SPIN_LENGTH_RATIO = 0.3
 local SPIN_SPEED = 38
-local SPIN_MIN_N, SPIN_MAX_N = 10, 64
+-- The ceiling is a cost, not a look: every dash is a texture the library
+-- re-points twice a frame, so a very wide window spreads them a little rather
+-- than putting eighty more of them on each highlighted row.
+local SPIN_MIN_N, SPIN_MAX_N = 16, 80
 
 local function StartSpin(frame)
     local width, height = frame:GetSize()
@@ -789,7 +792,7 @@ end
 -- animation attached.
 local HIGHLIGHT_STYLES = {
     spin = {
-        label = "Spinning",
+        label = "Spinning dashes",
         Start = StartSpin,
         Stop = function(r) LCG.PixelGlow_Stop(r) end,
     },
