@@ -290,41 +290,27 @@ local function AnnounceRow(row)
     SendAnnounce(AnnounceLines(row))
 end
 
--- The whole window read out, in the order it is painted. What is on screen is
--- the list: a bar hidden by its own scope or "hide when complete" option is
--- one you have already said you do not want to hear about.
-local function AnnounceAll()
-    local lines = {}
-    for _, row in ipairs(view and view.rows or {}) do
-        if row:IsShown() and row.canAnnounce then
-            for _, line in ipairs(AnnounceLines(row)) do
-                lines[#lines + 1] = line
-            end
-        end
-    end
-    SendAnnounce(lines)
-end
-
 -- Modified clicks anywhere in the window are shortcuts to the buff views;
 -- plain clicks stay with the rows themselves (the PallyPower row opens the
--- diff view). A row carries the check it draws (optionsKey), so alt-right-click
--- lands on that row's own cog options instead of the bare Buff Tracking list.
+-- diff view). A row carries the check it draws (optionsKey), which is what
+-- splits the two right-click shortcuts: on a row they act on that check, off
+-- one they act on the window.
+--
+-- Shift-Right-Click opens the settings, matching the Paladin Bar, and the row
+-- announce lives on the same chord over a row. Announce All is gone with the
+-- header percentage it went with: "tell the raid about every check at once" is
+-- a wall of text nobody asked twice for, and it sat on the shortcut a window
+-- wants for its own settings.
 local function StatusBarsClick(self, button)
     if button == "RightButton" then
+        local key = self and self.optionsKey
         if IsAltKeyDown() then
-            local key = self and self.optionsKey
-            if key then
-                WhoDoesWhat:OpenBuffTrackingOptions(key)
-            else
-                WhoDoesWhat:OpenAddonSettingsView("Status Bars")
-            end
+            if key then WhoDoesWhat:OpenBuffTrackingOptions(key) end
         elseif IsShiftKeyDown() then
-            -- Only a row speaks for itself; the title strip and the window
-            -- behind the rows speak for all of them.
-            if self and self.optionsKey then
+            if key then
                 AnnounceRow(self)
             else
-                AnnounceAll()
+                WhoDoesWhat:OpenAddonSettingsView("Status Bars")
             end
         end
     elseif button == "LeftButton" and IsShiftKeyDown() then
@@ -335,12 +321,9 @@ end
 -- Same double-line shortcut layout the minimap button uses. Only the title
 -- strip carries these now; the bars keep their tooltips to their own status.
 local function AddShortcutTooltipLines()
-    GameTooltip:AddDoubleLine("Alt-Right-Click:", "Settings",
-        1, 0.82, 0, 1, 1, 1)
-    GameTooltip:AddLine(" ")
     GameTooltip:AddDoubleLine("Shift-Left-Click:", "Buffing Grid",
         1, 0.82, 0, 1, 1, 1)
-    GameTooltip:AddDoubleLine("Shift-Right-Click:", "Announce All",
+    GameTooltip:AddDoubleLine("Shift-Right-Click:", "Settings",
         1, 0.82, 0, 1, 1, 1)
     GameTooltip:AddLine(" ")
     GameTooltip:AddDoubleLine("Alt-Right-Click Row:", "Edit",
@@ -416,8 +399,8 @@ local ARROW_ATLASES = {
     right = { "nameplates-target-arrow-right", "NamePlate-Target-Arrow-Right" },
 }
 local ARROW_FALLBACK = {
-    left = "Interface\Buttons\UI-SpellbookIcon-NextPage-Up",
-    right = "Interface\Buttons\UI-SpellbookIcon-PrevPage-Up",
+    left = "Interface\\Buttons\\UI-SpellbookIcon-NextPage-Up",
+    right = "Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Up",
 }
 
 local function SetArrowArt(tex, side)
@@ -1332,12 +1315,6 @@ local function LayoutHeader()
         and "Status" or "WDW Status")
     view.titleText:ClearAllPoints()
     view.titleText:SetPoint("LEFT", compact and 2 or 5, 0)
-    view.totalPercent:ClearAllPoints()
-    if compact then
-        view.totalPercent:SetPoint("RIGHT", view.title, "RIGHT", -2, 0)
-    else
-        view.totalPercent:SetPoint("LEFT", view.titleText, "RIGHT", 4, 0)
-    end
 end
 
 local function LayoutResizeHandle()
@@ -1395,15 +1372,14 @@ local function EnsureView()
     titleText:SetPoint("LEFT", 5, 0)
     titleText:SetText("WDW Status")
     view.titleText = titleText
-    local totalPercent = title:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    totalPercent:SetPoint("LEFT", titleText, "RIGHT", 4, 0)
-    totalPercent:SetText("(0%)")
-    view.totalPercent = totalPercent
     AttachAltDrag(title)
     title:SetScript("OnMouseUp", StatusBarsClick)
     title:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText("WDW Status Bars", 1, 1, 1)
+        -- Signed like the Paladin Bar's: a loose window on a busy screen, and
+        -- this is the one place it can say whose it is.
+        GameTooltip:SetText("|T" .. WhoDoesWhat.ADDON_ICON .. ":16:16:0:0|t "
+            .. "WhoDoesWhat Status Bars", 1, 1, 1)
         GameTooltip:AddDoubleLine("Alt-Drag:", "Move",
             1, 0.82, 0, 1, 1, 1)
         GameTooltip:AddDoubleLine("Alt-Drag-Edge:", "Resize",
@@ -1517,7 +1493,6 @@ function WhoDoesWhat:RefreshStatusBarsView()
     local _, _, coreCoverage = self.Assign.ComputeCoreRaidBuffCoverage()
     local colorPreviewMode = self.statusBarColorPreviewKey ~= nil
     local displayed = {}
-    local coreCorrect, coreTotal = 0, 0
     local coreCoverageByKey = {}
     for _, coverage in ipairs(coreCoverage) do
         coreCoverageByKey[coverage.key] = coverage
@@ -1692,14 +1667,6 @@ function WhoDoesWhat:RefreshStatusBarsView()
                     and options.saturatedStyle == "hide"
                 local available = coverage.available
                     or not options.hideBarUnavailable
-                -- An unavailable check never counts, shown or not: an
-                -- unfillable 0/25 would hold the raid total down forever.
-                if options.bar and inScope and coverage.available
-                    and not options.negative and options.includeInTotal
-                    and coverage.total > 0 then
-                    coreCorrect = coreCorrect + coverage.correct
-                    coreTotal = coreTotal + coverage.total
-                end
                 if colorPreview or (options.bar and inScope and available
                     and coverage.total > 0 and not saturatedHidden
                     and not (options.hideComplete and resolved)) then
@@ -1727,14 +1694,6 @@ function WhoDoesWhat:RefreshStatusBarsView()
             end
         end
     end
-    local countPaladinCoverage = normalPaladinBars
-        and paladinOptions.includeInTotal
-    local correct = (countPaladinCoverage and paladinCorrect or 0) + coreCorrect
-    local total = (countPaladinCoverage and paladinTotal or 0) + coreTotal
-    local totalPercent = total > 0 and math.floor(correct / total * 100 + 0.5) or 0
-    view.totalPercent:SetText(total > 0 and ("(" .. totalPercent .. "%)")
-        or ("|T" .. NOT_READY_ICON .. ":12:12:0:0|t"))
-
     local showEmptyCheck = #displayed == 0
     local rowsH = (#displayed + (showEmptyCheck and 1 or 0)) * ROW_H
     local contentH = rowsH

@@ -600,9 +600,6 @@ local function RefreshBuffOptionsFrame()
         and "Hide grid column when debuff missing"
         or "Hide grid column when complete")
     y = PlaceOption("hideColumnComplete", showHideColumnComplete, y)
-    local showIncludeInTotal = not options.negative
-        and not hidden.includeInTotal
-    y = PlaceOption("includeInTotal", showIncludeInTotal, y)
 
     local showMana = not hidden.onlyManaUsers
     local showTanks = not hidden.onlyTanks
@@ -617,7 +614,7 @@ local function RefreshBuffOptionsFrame()
     y = PlaceOption("hunterPets", showPets, y)
     for _, option in ipairs({ "bestAvailable", "anyInCombat", "flagOutsideRaid",
         "hideBarUnavailable",
-        "hideColumnUnavailable", "combinePaladinBars", "includeInTotal",
+        "hideColumnUnavailable", "combinePaladinBars",
         "negative", "hideComplete", "responsibleGlow", "offspecResponsible",
         "partialGlow", "partialGlowOnlyClass",
         "hideColumnComplete", "onlyManaUsers", "onlyTanks", "hunterPets" }) do
@@ -963,8 +960,6 @@ local function EnsureBuffOptionsFrame(owner, key)
             "Hide the Buff Grid column while the required class is absent." },
         { "combinePaladinBars", "Show single combined Paladin row",
             "Replace the individual Paladin progress bars with one raid-wide blessing progress bar." },
-        { "includeInTotal", "Include in Total Coverage Calculation",
-            "Count this buff in the percentage shown in the WDW Status header." },
         { "responsibleGlow", "Glow when responsible",
             "Glow this WDW Status row while you are the class that supplies the"
                 .. " buff and somebody is still missing it. With \"Only consider"
