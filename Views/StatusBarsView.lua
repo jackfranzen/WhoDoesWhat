@@ -261,19 +261,12 @@ local function AnnounceLine(prefix, names)
     return prefix .. body
 end
 
--- How far along the check is, as a fraction and a percentage of the whole. The
--- raid wants the size of the job; a roll call of two dozen names in raid chat
--- is a wall nobody reads, so the names only appear while there are few enough
--- to be a list rather than a wall.
---
--- Counted forwards, not backwards: "18/25 Applied" is the same fact as "7/25
--- missing" and reads as progress rather than an accusation.
-local MAX_NAMED_MISSING = 5
+-- Shared with the paladin buff mail (Core.lua), so every line WDW sends out
+-- about a check reads the same whichever window sent it.
+local MAX_NAMED_MISSING = WhoDoesWhat.MAX_NAMED_MISSING
 
 local function CoverageSummary(label, applied, total)
-    local percent = total > 0 and math.floor(applied * 100 / total + 0.5) or 0
-    return string.format("%s -- %d/%d Applied (%d%%)", label, applied, total,
-        percent)
+    return WhoDoesWhat:CoverageSummary(label, applied, total)
 end
 
 -- "Hewmongus (Might, Wisdom) -- 18/25 Applied (72%)". Which blessing each
@@ -437,11 +430,13 @@ local function RowWhispers(row)
         end
         return out
     end
-    -- The full list here, not the announce's summary: this is one person's own
-    -- to-do rather than a headline, and AnnounceLine keeps it inside what a
-    -- chat message can carry.
-    local msg = AnnounceLine(definition.name .. " -- " .. #missing
-        .. " missing: ", missing)
+    -- The announce's own line, minus the supplier clause naming the person
+    -- reading it: one wording for a check wherever it turns up.
+    local msg = CoverageSummary(definition.name, row.correct or 0,
+        row.total or 0)
+    if #missing <= MAX_NAMED_MISSING then
+        msg = AnnounceLine(msg .. " -- Missing: ", missing)
+    end
     for _, name in ipairs(SuppliersForCheck(row.buffKey, definition, options)) do
         if CanWhisper(name) then
             out[#out + 1] = { name = name, bare = true, msg = msg }

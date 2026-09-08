@@ -2073,47 +2073,32 @@ local function ShortAssignmentName(name)
     return WhoDoesWhat:DisplayName(name)
 end
 
+-- The same line the status bars send about any other check (`CoverageSummary`),
+-- so a paladin hears one wording whichever window nudged them.
+--
+-- Names only, no "Target->Blessing" pairs: a paladin knows their own
+-- assignment, and spelling it out per raider turned one line into a paragraph.
+-- A raider short of two blessings is one name, not two.
 local function PaladinBuffWhisperText(coverage)
     local missing = coverage and coverage.missing or {}
-    local missingCount = #missing
-    if missingCount == 0 then return nil end
+    if #missing == 0 then return nil end
 
-    local percent = coverage.total > 0
-        and math.floor(coverage.correct * 100 / coverage.total + 0.5) or 0
-    local lead = "Pally Buffs (" .. percent .. "%) "
-
-    if missingCount < 5 then
-        table.sort(missing, function(a, b)
-            local an, bn = ShortAssignmentName(a.target), ShortAssignmentName(b.target)
-            if an ~= bn then return an < bn end
-            return a.key < b.key
-        end)
-        local parts = {}
-        for _, cell in ipairs(missing) do
-            parts[#parts + 1] = ShortAssignmentName(cell.target) .. "->"
-                .. WhoDoesWhat.PaladinBuffs[cell.key].name_long
-        end
-        return lead .. missingCount .. " Missing, " .. table.concat(parts, ", ")
-    end
-
-    local counts, parts, canonicalIndex = {}, {}, {}
+    local seen, names = {}, {}
     for _, cell in ipairs(missing) do
-        counts[cell.key] = (counts[cell.key] or 0) + 1
-    end
-    for i, key in ipairs(WhoDoesWhat.CanonicalBuffOrder) do
-        canonicalIndex[key] = i
-        if counts[key] then
-            parts[#parts + 1] = { key = key, count = counts[key] }
+        local name = ShortAssignmentName(cell.target)
+        if not seen[name] then
+            seen[name] = true
+            names[#names + 1] = name
         end
     end
-    table.sort(parts, function(a, b)
-        if a.count ~= b.count then return a.count > b.count end
-        return canonicalIndex[a.key] < canonicalIndex[b.key]
-    end)
-    for i, part in ipairs(parts) do
-        parts[i] = WhoDoesWhat.PaladinBuffs[part.key].name_long .. " x" .. part.count
+    table.sort(names)
+
+    local text = WhoDoesWhat:CoverageSummary("Pally Buffs", coverage.correct,
+        coverage.total)
+    if #names <= WhoDoesWhat.MAX_NAMED_MISSING then
+        text = text .. " -- Missing: " .. table.concat(names, ", ")
     end
-    return lead .. "Missing " .. table.concat(parts, ", ")
+    return text
 end
 
 local function GetPaladinBuffWhisper(name)

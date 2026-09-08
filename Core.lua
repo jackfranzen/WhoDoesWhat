@@ -34,6 +34,23 @@ WhoDoesWhat.WARNING_ICON = "Interface\\DialogFrame\\UI-Dialog-Icon-AlertNew"
 -- name the addon outright.
 WhoDoesWhat.ADDON_ICON = "Interface\\AddOns\\WhoDoesWhat\\Media\\Icon.tga"
 
+-- One shape for every "how is this buff doing" line WDW sends out -- the status
+-- bars' raid announce, their whisper to whoever supplies the buff, and the
+-- paladin buff mail from the main window -- so a check reads the same wherever
+-- it arrives.
+--
+-- Counted forwards: "18/25 Applied" is the same fact as "7 missing" and reads
+-- as progress rather than an accusation. Names of the stragglers are the
+-- caller's to append, and only while there are few enough to be a list rather
+-- than a wall -- MAX_NAMED_MISSING is where that stops.
+WhoDoesWhat.MAX_NAMED_MISSING = 5
+
+function WhoDoesWhat:CoverageSummary(label, applied, total)
+    local percent = total > 0 and math.floor(applied * 100 / total + 0.5) or 0
+    return string.format("%s -- %d/%d Applied (%d%%)", label, applied, total,
+        percent)
+end
+
 -- The single letter that stands in for a name in tight spaces (status bar
 -- rows, buff-grid column headers). Names are UTF-8, so an accented first
 -- letter like "Ándraste" is two bytes: a plain :sub(1, 1) would hand the font
